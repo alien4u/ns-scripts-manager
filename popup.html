@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetSuite Scripts Manager</title>
+    <link rel="stylesheet" type="text/css" href="css/main.css">
+    <script src="js/popup.js" defer></script>
+</head>
+<body>
+
+<!-- ── SVG Icon Sprite (hidden) ── -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none;">
+    <symbol id="ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+    </symbol>
+    <symbol id="ico-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83
+                 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0
+                 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9
+                 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0
+                 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68
+                 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1
+                 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0
+                 0 0-.33-1.82l-.06-.06a2 2 0 0 1
+                 2.83-2.83l.06.06A1.65 1.65 0 0 0 9
+                 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1
+                 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65
+                 0 0 0 1.82-.33l.06-.06a2 2 0 0 1
+                 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4
+                 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1
+                 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </symbol>
+    <symbol id="ico-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2
+                 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </symbol>
+    <symbol id="ico-code" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 18 22 12 16 6"/>
+        <polyline points="8 6 2 12 8 18"/>
+    </symbol>
+    <symbol id="ico-info" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="16" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12.01" y2="8"/>
+    </symbol>
+    <symbol id="ico-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </symbol>
+    <symbol id="ico-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+    </symbol>
+    <symbol id="ico-grip" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/>
+        <circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/>
+        <circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/>
+    </symbol>
+    <symbol id="ico-external" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0
+                 0 1 2-2h6"/>
+        <polyline points="15 3 21 3 21 9"/>
+        <line x1="10" y1="14" x2="21" y2="3"/>
+    </symbol>
+    <symbol id="ico-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+    </symbol>
+    <symbol id="ico-download" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+    </symbol>
+    <symbol id="ico-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+    </symbol>
+    <symbol id="ico-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+    </symbol>
+    <symbol id="ico-x" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+    </symbol>
+    <symbol id="ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4
+                 a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    </symbol>
+</svg>
+
+<!-- ── Toolbar ── -->
+<header class="sm-toolbar">
+    <span class="sm-toolbar-title">NetSuite Scripts Manager</span>
+    <div class="sm-toolbar-actions">
+        <button id="refreshBtn" class="sm-icon-btn" title="Refresh data">
+            <svg class="sm-icon"><use href="#ico-refresh"/></svg>
+        </button>
+        <button id="schedulerBtn" class="sm-icon-btn" title="Scheduled Deployments Sync">
+            <svg class="sm-icon"><use href="#ico-clock"/></svg>
+        </button>
+        <button id="settingsBtn" class="sm-icon-btn" title="Group display order">
+            <svg class="sm-icon"><use href="#ico-settings"/></svg>
+        </button>
+        <button id="scriptedRecordsBtn" class="sm-icon-btn" title="Scripted Records" disabled>
+            <svg class="sm-icon"><use href="#ico-external"/></svg>
+        </button>
+    </div>
+</header>
+
+<!-- ── Filter Bar ── -->
+<div class="sm-filter-bar">
+    <button id="compactToggle" class="sm-pill" title="Toggle compact mode">Compact</button>
+    <button id="darkToggle" class="sm-pill" title="Toggle dark mode">Dark</button>
+    <button id="deployedToggle" class="sm-pill" title="Show deployed only">Deployed</button>
+    <select id="sortSelect" class="sm-sort-select" title="Sort order">
+        <option value="stack">Stack Order</option>
+        <option value="asc">A → Z</option>
+        <option value="desc">Z → A</option>
+    </select>
+</div>
+
+<!-- ── Settings Drawer (Group Order) ── -->
+<div id="settingsDrawer" class="sm-drawer" style="display:none;">
+    <div class="sm-drawer-header">
+        <span>Drag to reorder groups</span>
+    </div>
+    <div id="groupOrderList" class="sm-drawer-body"></div>
+</div>
+
+<!-- ── Scheduler Warning Gate ── -->
+<div id="schedulerWarning" class="sm-warning" style="display:none;"></div>
+
+<!-- ── Scheduler Panel ── -->
+<div id="schedulerPanel" class="sm-scheduler" style="display:none;">
+    <div class="sm-scheduler-header">
+        <span>Scheduled Deployments Sync</span>
+    </div>
+    <div class="sm-scheduler-body">
+        <div class="sm-scheduler-env">
+            Environment: <span id="schedulerEnv" class="sm-env-badge">--</span>
+        </div>
+        <div class="sm-scheduler-actions">
+            <button id="schedulerCollectBtn" class="sm-scheduler-btn collect" title="Collect scheduled deployments from current environment">
+                <svg class="sm-icon"><use href="#ico-download"/></svg>
+                Collect
+            </button>
+            <button id="schedulerCheckBtn" class="sm-scheduler-btn check" disabled title="Check current status in this environment">
+                <svg class="sm-icon"><use href="#ico-info"/></svg>
+                Check
+            </button>
+            <button id="schedulerApplyBtn" class="sm-scheduler-btn apply" disabled title="Apply selected deployments to current environment">
+                <svg class="sm-icon"><use href="#ico-upload"/></svg>
+                Apply
+            </button>
+            <button id="schedulerLogBtn" class="sm-scheduler-btn log" style="display:none;" title="View error log">
+                <svg class="sm-icon"><use href="#ico-info"/></svg>
+                Log
+            </button>
+            <button id="schedulerClearBtn" class="sm-scheduler-btn clear" disabled title="Clear stored deployments">
+                <svg class="sm-icon"><use href="#ico-trash"/></svg>
+            </button>
+        </div>
+        <div id="schedulerStatus" class="sm-scheduler-status"></div>
+        <div id="schedulerListHeader" class="sm-scheduler-list-header" style="display:none;">
+            <label class="sm-sched-select-all">
+                <input type="checkbox" id="schedulerSelectAll" class="sm-sched-cb" checked>
+                <span>Select All</span>
+            </label>
+            <span id="schedulerSelectedCount" class="sm-sched-selected-count"></span>
+        </div>
+        <div id="schedulerList" class="sm-scheduler-list"></div>
+    </div>
+</div>
+
+<!-- ── Spinner (pulsing three-dot) ── -->
+<div id="spinner" class="sm-spinner">
+    <span class="sm-dot"></span>
+    <span class="sm-dot"></span>
+    <span class="sm-dot"></span>
+</div>
+
+<!-- ── Message Area ── -->
+<div id="message" class="sm-message"></div>
+
+<!-- ── Card Container ── -->
+<div id="scriptCards" class="sm-cards"></div>
+
+<!-- ── Footer ── -->
+<footer class="sm-footer">
+    <div class="sm-footer-row">
+        <span class="sm-footer-text">NetSuite Scripts Manager v1.0.0</span>
+        <span class="sm-footer-sep"></span>
+        <span class="sm-footer-brand">
+            <img src="img/alien-tech.svg" alt="" class="sm-footer-logo">
+            <span>by Alien Technology LLC</span>
+        </span>
+    </div>
+    <div class="sm-footer-row sm-footer-sponsor">
+        <span>Sponsored by</span>
+        <a href="https://suitemigration.com/netsuite-extension-alien/" target="_blank" rel="noopener noreferrer">
+            <img src="img/spon-logo.png" alt="SuiteMigration" class="sm-sponsor-logo">
+        </a>
+    </div>
+    <div class="sm-footer-row sm-sponsor-text">
+        Migrate your finance data to NetSuite without the Migraine using <a href="https://suitemigration.com/netsuite-extension-alien/" target="_blank" rel="noopener noreferrer">suitemigration.com</a>.
+    </div>
+</footer>
+
+<div id="resizeHandle" class="sm-resize-handle" title="Drag to resize">
+    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="21" y1="3" x2="3" y2="21"/>
+        <line x1="21" y1="11" x2="11" y2="21"/>
+        <line x1="21" y1="19" x2="19" y2="21"/>
+    </svg>
+</div>
+
+</body>
+</html>
