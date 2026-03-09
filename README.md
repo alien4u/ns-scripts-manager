@@ -207,7 +207,7 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 
 - Icons and store images co-authored with **Gemini NanoBanana Pro**
 - Code co-authored with **Claude Code**
-- Sponsored by **[SuiteMigration](https://suitemigration.com/netsuite-extension-alien/)**
+- Sponsored by **[SuiteMigration](https://suitemigration.com/netsuite-extension-alien/?utm_source=alien_technology&utm_medium=banner&utm_campaign=alien_extensions&utm_content=ns-scripts-manager)**
 
 ## License
 
