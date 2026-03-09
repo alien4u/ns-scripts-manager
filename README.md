@@ -18,7 +18,7 @@
 
 | Store | Version | Link |
 |-------|---------|------|
-| Chrome Web Store | v1.0.0 | *Coming soon* |
+| Chrome Web Store | v1.0.0 | [Install](https://chromewebstore.google.com/detail/netsuite-scripts-manager/cnedjecifkobibjlopnpofochhhefihl) |
 | Edge Add-ons | v1.0.0 | *Coming soon* |
 | Firefox Add-ons | v1.0.0 | *Coming soon* |
 
