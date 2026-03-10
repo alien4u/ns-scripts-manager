@@ -10,7 +10,7 @@
 
 **Instantly view all deployed scripts and workflows on any NetSuite record. Sort by execution order, filter, and jump to source code in one click.**
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 ![License](https://img.shields.io/badge/license-FSL--1.1--MIT-green)
 ![Manifest](https://img.shields.io/badge/manifest-v3-orange)
 
@@ -18,9 +18,9 @@
 
 | Store | Version | Link |
 |-------|---------|------|
-| Chrome Web Store | v1.0.0 | [Install](https://chromewebstore.google.com/detail/netsuite-scripts-manager/cnedjecifkobibjlopnpofochhhefihl) |
-| Edge Add-ons | v1.0.0 | *Coming soon* |
-| Firefox Add-ons | v1.0.0 | *Coming soon* |
+| Chrome Web Store | v1.0.1 | [Install](https://chromewebstore.google.com/detail/netsuite-scripts-manager/cnedjecifkobibjlopnpofochhhefihl) |
+| Edge Add-ons | v1.0.1 | *Coming soon* |
+| Firefox Add-ons | v1.0.1 | *Coming soon* |
 
 ## Overview
 

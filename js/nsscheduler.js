@@ -70,14 +70,14 @@
                             pSearch.createColumn({name: 'script'}),
                             pSearch.createColumn({name: 'scriptid', join: 'script'})
                         ]
-                    }).run().each((oResult) => {
+                    }).run().each((pResult) => {
 
                         aResults.push({
-                            internalId: oResult.id,
-                            deploymentId: oResult.getValue('scriptid'),
-                            title: oResult.getValue('title'),
-                            scriptName: oResult.getText('script'),
-                            scriptId: oResult.getValue({name: 'scriptid', join: 'script'})
+                            internalId: pResult.id,
+                            deploymentId: pResult.getValue('scriptid'),
+                            title: pResult.getValue('title'),
+                            scriptName: pResult.getText('script'),
+                            scriptId: pResult.getValue({name: 'scriptid', join: 'script'})
                         });
 
                         return true;
@@ -128,14 +128,14 @@
 
             if (oSearchResults) {
 
-                oSearchResults.forEach((oResult) => {
+                oSearchResults.forEach((pResult) => {
 
                     aResults.push({
-                        internalId: oResult.getId(),
-                        deploymentId: oResult.getValue('scriptid'),
-                        title: oResult.getValue('title'),
-                        scriptName: oResult.getText('script'),
-                        scriptId: oResult.getValue('scriptid', 'script')
+                        internalId: pResult.getId(),
+                        deploymentId: pResult.getValue('scriptid'),
+                        title: pResult.getValue('title'),
+                        scriptName: pResult.getText('script'),
+                        scriptId: pResult.getValue('scriptid', 'script')
                     });
                 });
             }
@@ -157,11 +157,11 @@
     /**
      * Routes to the appropriate SuiteScript version for checking deployment status.
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      */
-    function checkDeploymentStatus(aDeployments) {
+    function checkDeploymentStatus(pDeployments) {
 
-        if (!aDeployments || !aDeployments.length) {
+        if (!pDeployments || !pDeployments.length) {
             postResult('SCHEDULER_CHECK_RESULT', null, 'No deployments to check.');
             return;
         }
@@ -170,9 +170,9 @@
         const bHasNlapi = typeof nlapiSearchRecord !== 'undefined';
 
         if (bHasRequire) {
-            checkV2(aDeployments);
+            checkV2(pDeployments);
         } else if (bHasNlapi) {
-            checkV1(aDeployments);
+            checkV1(pDeployments);
         } else {
             postResult('SCHEDULER_CHECK_RESULT', null, 'Neither SuiteScript 2.x nor 1.0 is available on this page.');
         }
@@ -181,12 +181,12 @@
     /**
      * Builds an internalid anyof filter from a list of deployments.
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      * @returns {Array}
      */
-    function buildIdFilters(aDeployments) {
+    function buildIdFilters(pDeployments) {
 
-        return [['internalid', 'anyof', aDeployments.map((oDep) => oDep.internalId)]];
+        return [['internalid', 'anyof', pDeployments.map((pDep) => pDep.internalId)]];
     }
 
     /**
@@ -194,13 +194,13 @@
      * Keys results by the original (production) internal ID so the popup can match.
      *
      * @param {Object} pSearch - N/search module
-     * @param {Array} aDeployments
-     * @param {Object} oStatusMap - Map already populated by internal ID search
+     * @param {Array} pDeployments
+     * @param {Object} pStatusMap - Map already populated by internal ID search
      */
-    function checkFallbackV2(pSearch, aDeployments, oStatusMap) {
+    function checkFallbackV2(pSearch, pDeployments, pStatusMap) {
 
-        const aMissing = aDeployments.filter((oDep) =>
-            oDep.deploymentId && !oStatusMap[oDep.internalId]
+        const aMissing = pDeployments.filter((pDep) =>
+            pDep.deploymentId && !pStatusMap[pDep.internalId]
         );
 
         if (aMissing.length === 0) {
@@ -209,11 +209,11 @@
 
         const oScriptIdToOrigId = {};
 
-        aMissing.forEach((oDep) => {
-            oScriptIdToOrigId[oDep.deploymentId] = oDep.internalId;
+        aMissing.forEach((pDep) => {
+            oScriptIdToOrigId[pDep.deploymentId] = pDep.internalId;
         });
 
-        const aScriptIds = aMissing.map((oDep) => oDep.deploymentId);
+        const aScriptIds = aMissing.map((pDep) => pDep.deploymentId);
 
         pSearch.create({
             type: 'scriptdeployment',
@@ -224,21 +224,21 @@
                 pSearch.createColumn({name: 'isdeployed'}),
                 pSearch.createColumn({name: 'isinactive', join: 'script'})
             ]
-        }).run().each((oResult) => {
+        }).run().each((pResult) => {
 
-            const sScriptId = oResult.getValue('scriptid');
+            const sScriptId = pResult.getValue('scriptid');
             const sOrigId = oScriptIdToOrigId[sScriptId];
 
-            if (!sOrigId || oStatusMap[sOrigId]) {
+            if (!sOrigId || pStatusMap[sOrigId]) {
                 return true;
             }
 
-            if (oResult.getValue({name: 'isinactive', join: 'script'}) === 'T') {
-                oStatusMap[sOrigId] = 'INACTIVE_SCRIPT';
-            } else if (oResult.getValue('isdeployed') === 'F') {
-                oStatusMap[sOrigId] = 'UNDEPLOYED';
-            } else if (oStatusMap[sOrigId] !== 'SCHEDULED') {
-                oStatusMap[sOrigId] = oResult.getValue('status');
+            if (pResult.getValue({name: 'isinactive', join: 'script'}) === 'T') {
+                pStatusMap[sOrigId] = 'INACTIVE_SCRIPT';
+            } else if (pResult.getValue('isdeployed') === 'F') {
+                pStatusMap[sOrigId] = 'UNDEPLOYED';
+            } else if (pStatusMap[sOrigId] !== 'SCHEDULED') {
+                pStatusMap[sOrigId] = pResult.getValue('status');
             }
 
             return true;
@@ -248,9 +248,9 @@
     /**
      * Checks deployment status using SuiteScript 2.x N/search.
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      */
-    function checkV2(aDeployments) {
+    function checkV2(pDeployments) {
 
         try {
 
@@ -262,26 +262,26 @@
 
                     pSearch.create({
                         type: 'scriptdeployment',
-                        filters: buildIdFilters(aDeployments),
+                        filters: buildIdFilters(pDeployments),
                         columns: [
                             pSearch.createColumn({name: 'status'}),
                             pSearch.createColumn({name: 'isdeployed'}),
                             pSearch.createColumn({name: 'isinactive', join: 'script'})
                         ]
-                    }).run().each((oResult) => {
+                    }).run().each((pResult) => {
 
-                        if (oResult.getValue({name: 'isinactive', join: 'script'}) === 'T') {
-                            oStatusMap[oResult.id] = 'INACTIVE_SCRIPT';
-                        } else if (oResult.getValue('isdeployed') === 'F') {
-                            oStatusMap[oResult.id] = 'UNDEPLOYED';
+                        if (pResult.getValue({name: 'isinactive', join: 'script'}) === 'T') {
+                            oStatusMap[pResult.id] = 'INACTIVE_SCRIPT';
+                        } else if (pResult.getValue('isdeployed') === 'F') {
+                            oStatusMap[pResult.id] = 'UNDEPLOYED';
                         } else {
-                            oStatusMap[oResult.id] = oResult.getValue('status');
+                            oStatusMap[pResult.id] = pResult.getValue('status');
                         }
                         return true;
                     });
 
                     try {
-                        checkFallbackV2(pSearch, aDeployments, oStatusMap);
+                        checkFallbackV2(pSearch, pDeployments, oStatusMap);
                     } catch (ignore) {
                         /* fallback check failed, proceed with what we have */
                     }
@@ -302,13 +302,13 @@
      * Finds deployments not matched by internal ID and resolves them by scriptid (SS 1.0).
      * Keys results by the original (production) internal ID so the popup can match.
      *
-     * @param {Array} aDeployments
-     * @param {Object} oStatusMap - Map already populated by internal ID search
+     * @param {Array} pDeployments
+     * @param {Object} pStatusMap - Map already populated by internal ID search
      */
-    function checkFallbackV1(aDeployments, oStatusMap) {
+    function checkFallbackV1(pDeployments, pStatusMap) {
 
-        const aMissing = aDeployments.filter((oDep) =>
-            oDep.deploymentId && !oStatusMap[oDep.internalId]
+        const aMissing = pDeployments.filter((pDep) =>
+            pDep.deploymentId && !pStatusMap[pDep.internalId]
         );
 
         if (aMissing.length === 0) {
@@ -317,11 +317,11 @@
 
         const oScriptIdToOrigId = {};
 
-        aMissing.forEach((oDep) => {
-            oScriptIdToOrigId[oDep.deploymentId] = oDep.internalId;
+        aMissing.forEach((pDep) => {
+            oScriptIdToOrigId[pDep.deploymentId] = pDep.internalId;
         });
 
-        const aScriptIds = aMissing.map((oDep) => oDep.deploymentId);
+        const aScriptIds = aMissing.map((pDep) => pDep.deploymentId);
 
         const oResults = nlapiSearchRecord('scriptdeployment', null,
             buildScriptIdFilters(aScriptIds),
@@ -335,21 +335,21 @@
 
         if (oResults) {
 
-            oResults.forEach((oResult) => {
+            oResults.forEach((pResult) => {
 
-                const sScriptId = oResult.getValue('scriptid');
+                const sScriptId = pResult.getValue('scriptid');
                 const sOrigId = oScriptIdToOrigId[sScriptId];
 
-                if (!sOrigId || oStatusMap[sOrigId]) {
+                if (!sOrigId || pStatusMap[sOrigId]) {
                     return;
                 }
 
-                if (oResult.getValue('isinactive', 'script') === 'T') {
-                    oStatusMap[sOrigId] = 'INACTIVE_SCRIPT';
-                } else if (oResult.getValue('isdeployed') === 'F') {
-                    oStatusMap[sOrigId] = 'UNDEPLOYED';
-                } else if (oStatusMap[sOrigId] !== 'SCHEDULED') {
-                    oStatusMap[sOrigId] = oResult.getValue('status');
+                if (pResult.getValue('isinactive', 'script') === 'T') {
+                    pStatusMap[sOrigId] = 'INACTIVE_SCRIPT';
+                } else if (pResult.getValue('isdeployed') === 'F') {
+                    pStatusMap[sOrigId] = 'UNDEPLOYED';
+                } else if (pStatusMap[sOrigId] !== 'SCHEDULED') {
+                    pStatusMap[sOrigId] = pResult.getValue('status');
                 }
             });
         }
@@ -358,16 +358,16 @@
     /**
      * Checks deployment status using SuiteScript 1.0 nlapiSearchRecord.
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      */
-    function checkV1(aDeployments) {
+    function checkV1(pDeployments) {
 
         try {
 
             const oStatusMap = {};
 
             const oSearchResults = nlapiSearchRecord('scriptdeployment', null,
-                buildIdFilters(aDeployments),
+                buildIdFilters(pDeployments),
                 [
                     new nlobjSearchColumn('status'),
                     new nlobjSearchColumn('isdeployed'),
@@ -377,20 +377,20 @@
 
             if (oSearchResults) {
 
-                oSearchResults.forEach((oResult) => {
+                oSearchResults.forEach((pResult) => {
 
-                    if (oResult.getValue('isinactive', 'script') === 'T') {
-                        oStatusMap[oResult.getId()] = 'INACTIVE_SCRIPT';
-                    } else if (oResult.getValue('isdeployed') === 'F') {
-                        oStatusMap[oResult.getId()] = 'UNDEPLOYED';
+                    if (pResult.getValue('isinactive', 'script') === 'T') {
+                        oStatusMap[pResult.getId()] = 'INACTIVE_SCRIPT';
+                    } else if (pResult.getValue('isdeployed') === 'F') {
+                        oStatusMap[pResult.getId()] = 'UNDEPLOYED';
                     } else {
-                        oStatusMap[oResult.getId()] = oResult.getValue('status');
+                        oStatusMap[pResult.getId()] = pResult.getValue('status');
                     }
                 });
             }
 
             try {
-                checkFallbackV1(aDeployments, oStatusMap);
+                checkFallbackV1(pDeployments, oStatusMap);
             } catch (ignore) {
                 /* fallback check failed, proceed with what we have */
             }
@@ -433,11 +433,11 @@
     /**
      * Routes to the appropriate SuiteScript version for applying scheduled status.
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      */
-    function applyScheduledDeployments(aDeployments) {
+    function applyScheduledDeployments(pDeployments) {
 
-        if (!aDeployments || !aDeployments.length) {
+        if (!pDeployments || !pDeployments.length) {
             postResult('SCHEDULER_APPLY_RESULT', null, 'No deployments to apply.');
             return;
         }
@@ -446,9 +446,9 @@
         const bHasNlapi = typeof nlapiSubmitField !== 'undefined';
 
         if (bHasRequire) {
-            applyV2(aDeployments);
+            applyV2(pDeployments);
         } else if (bHasNlapi) {
-            applyV1(aDeployments);
+            applyV1(pDeployments);
         } else {
             postResult('SCHEDULER_APPLY_RESULT', null, 'Neither SuiteScript 2.x nor 1.0 is available on this page.');
         }
@@ -458,20 +458,20 @@
      * Builds OR-chained scriptid filters for text field matching.
      * e.g. [['scriptid','is','id1'],'OR',['scriptid','is','id2'],...]
      *
-     * @param {Array} aScriptIds
+     * @param {Array} pScriptIds
      * @returns {Array}
      */
-    function buildScriptIdFilters(aScriptIds) {
+    function buildScriptIdFilters(pScriptIds) {
 
         const aFilters = [];
 
-        aScriptIds.forEach((sId, iIdx) => {
+        pScriptIds.forEach((pId, pIdx) => {
 
-            if (iIdx > 0) {
+            if (pIdx > 0) {
                 aFilters.push('OR');
             }
 
-            aFilters.push(['scriptid', 'is', sId]);
+            aFilters.push(['scriptid', 'is', pId]);
         });
 
         return aFilters;
@@ -482,15 +482,15 @@
      * a single search (1 governance unit) instead of per-item lookups.
      *
      * @param {Object} pSearch - N/search module
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      * @returns {Object} Map of scriptid -> internal ID
      */
-    function buildFallbackMapV2(pSearch, aDeployments) {
+    function buildFallbackMapV2(pSearch, pDeployments) {
 
         const oMap = {};
-        const aScriptIds = aDeployments
-            .map((oDep) => oDep.deploymentId)
-            .filter((sId) => !!sId);
+        const aScriptIds = pDeployments
+            .map((pDep) => pDep.deploymentId)
+            .filter((pId) => !!pId);
 
         if (aScriptIds.length === 0) {
             return oMap;
@@ -506,9 +506,9 @@
                 buildScriptIdFilters(aScriptIds)
             ],
             columns: [pSearch.createColumn({name: 'scriptid'})]
-        }).run().each((oResult) => {
+        }).run().each((pResult) => {
 
-            oMap[oResult.getValue('scriptid')] = oResult.id;
+            oMap[pResult.getValue('scriptid')] = pResult.id;
             return true;
         });
 
@@ -519,9 +519,9 @@
      * Applies scheduled status using SuiteScript 2.x N/record with bulk
      * script ID fallback map (single search, not per-item).
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      */
-    function applyV2(aDeployments) {
+    function applyV2(pDeployments) {
 
         try {
 
@@ -530,7 +530,7 @@
                 let oFallbackMap = {};
 
                 try {
-                    oFallbackMap = buildFallbackMapV2(pSearch, aDeployments);
+                    oFallbackMap = buildFallbackMapV2(pSearch, pDeployments);
                 } catch (ignore) {
                     /* fallback map build failed, proceed without it */
                 }
@@ -540,12 +540,12 @@
 
                 function processNext() {
 
-                    if (iIndex >= aDeployments.length) {
+                    if (iIndex >= pDeployments.length) {
                         postResult('SCHEDULER_APPLY_RESULT', aResults, null);
                         return;
                     }
 
-                    const oDep = aDeployments[iIndex];
+                    const oDep = pDeployments[iIndex];
                     let oItemResult;
 
                     try {
@@ -630,15 +630,15 @@
      * Builds a bulk fallback map of deploymentId -> sandbox internal ID using
      * a single nlapiSearchRecord call (1 governance unit).
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      * @returns {Object} Map of scriptid -> internal ID
      */
-    function buildFallbackMapV1(aDeployments) {
+    function buildFallbackMapV1(pDeployments) {
 
         const oMap = {};
-        const aScriptIds = aDeployments
-            .map((oDep) => oDep.deploymentId)
-            .filter((sId) => !!sId);
+        const aScriptIds = pDeployments
+            .map((pDep) => pDep.deploymentId)
+            .filter((pId) => !!pId);
 
         if (aScriptIds.length === 0) {
             return oMap;
@@ -657,9 +657,9 @@
 
         if (oResults) {
 
-            oResults.forEach((oResult) => {
+            oResults.forEach((pResult) => {
 
-                oMap[oResult.getValue('scriptid')] = oResult.getId();
+                oMap[pResult.getValue('scriptid')] = pResult.getId();
             });
         }
 
@@ -670,14 +670,14 @@
      * Applies scheduled status using SuiteScript 1.0 nlapiSubmitField with bulk
      * script ID fallback map (single search, not per-item).
      *
-     * @param {Array} aDeployments
+     * @param {Array} pDeployments
      */
-    function applyV1(aDeployments) {
+    function applyV1(pDeployments) {
 
         let oFallbackMap = {};
 
         try {
-            oFallbackMap = buildFallbackMapV1(aDeployments);
+            oFallbackMap = buildFallbackMapV1(pDeployments);
         } catch (ignore) {
             /* fallback map build failed, proceed without it */
         }
@@ -687,12 +687,12 @@
 
         function processNext() {
 
-            if (iIndex >= aDeployments.length) {
+            if (iIndex >= pDeployments.length) {
                 postResult('SCHEDULER_APPLY_RESULT', aResults, null);
                 return;
             }
 
-            const oDep = aDeployments[iIndex];
+            const oDep = pDeployments[iIndex];
             let oItemResult;
 
             try {
@@ -767,14 +767,14 @@
     /**
      * Posts a result message back to the content script via window.postMessage.
      *
-     * @param {string} sType - Message type identifier
+     * @param {string} pType - Message type identifier
      * @param {*} pData - Result data
      * @param {string|null} pError - Error message or null
      */
-    function postResult(sType, pData, pError) {
+    function postResult(pType, pData, pError) {
 
         window.postMessage({
-            type: sType,
+            type: pType,
             error: pError,
             data: pData
         }, window.location.origin);

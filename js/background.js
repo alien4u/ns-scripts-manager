@@ -8,67 +8,64 @@
 
 const NETSUITE_URL_PATTERN = /^https:\/\/[^/]*\.netsuite\.com\/app\//;
 
-/* ────────────────────────────────────────────────
- * Cross-browser API reference
- * ──────────────────────────────────────────────── */
-
 const browserAPI = (typeof browser !== 'undefined' && browser.runtime) ? browser : chrome;
 
 /* ────────────────────────────────────────────────
  * Contextual Icon Activation
  * ──────────────────────────────────────────────── */
 
-/**
- * Updates the extension icon state based on the tab URL.
- *
- * @param {number} pTabId
- * @param {string} pUrl
- */
-const updateIconState = (pTabId, pUrl) => {
+if (chrome.declarativeContent) {
 
-    if (!pTabId || !pUrl) {
-        return;
-    }
+    /* Chrome: use declarativeContent (no host_permissions needed) */
+    browserAPI.runtime.onInstalled.addListener(() => {
 
-    const bIsNetSuitePage = NETSUITE_URL_PATTERN.test(pUrl);
+        browserAPI.action.disable();
 
-    if (bIsNetSuitePage) {
-        browserAPI.action.enable(pTabId);
-    } else {
-        browserAPI.action.disable(pTabId);
-    }
-};
+        chrome.declarativeContent.onPageChanged.removeRules(undefined, () => {
 
-/* Disable by default on install */
-browserAPI.runtime.onInstalled.addListener(() => {
-
-    browserAPI.action.disable();
-});
-
-/* Enable/disable as user navigates */
-browserAPI.tabs.onUpdated.addListener((pTabId, pChangeInfo, pTab) => {
-
-    if (pChangeInfo.url || pChangeInfo.status === 'complete') {
-        updateIconState(pTabId, pTab.url || '');
-    }
-});
-
-/* Handle tab activation (switching tabs) */
-browserAPI.tabs.onActivated.addListener((pActiveInfo) => {
-
-    /* tabs.get returns a Promise in Firefox MV3, uses callback in Chrome.
-     * Using Promise.resolve wrapping handles both cases. */
-    Promise.resolve(browserAPI.tabs.get(pActiveInfo.tabId)).then((oTab) => {
-
-        if (oTab) {
-            updateIconState(oTab.id, oTab.url || '');
-        }
-
-    }).catch(() => {
-
-        /* Tab may have been closed before we got to it */
+            chrome.declarativeContent.onPageChanged.addRules([{
+                conditions: [
+                    new chrome.declarativeContent.PageStateMatcher({
+                        pageUrl: {hostSuffix: '.netsuite.com', pathPrefix: '/app/'}
+                    })
+                ],
+                actions: [new chrome.declarativeContent.ShowAction()]
+            }]);
+        });
     });
-});
+
+} else {
+
+    /* Firefox: fall back to tabs-based URL matching */
+    const updateIconState = (pTabId, pUrl) => {
+
+        if (!pTabId) return;
+
+        if (pUrl && NETSUITE_URL_PATTERN.test(pUrl)) {
+            browserAPI.action.enable(pTabId);
+        } else {
+            browserAPI.action.disable(pTabId);
+        }
+    };
+
+    browserAPI.runtime.onInstalled.addListener(() => {
+        browserAPI.action.disable();
+    });
+
+    browserAPI.tabs.onUpdated.addListener((pTabId, pChangeInfo, pTab) => {
+
+        if (pChangeInfo.url || pChangeInfo.status === 'complete') {
+            updateIconState(pTabId, pTab.url || '');
+        }
+    });
+
+    browserAPI.tabs.onActivated.addListener((pActiveInfo) => {
+
+        Promise.resolve(browserAPI.tabs.get(pActiveInfo.tabId)).then((oTab) => {
+            if (oTab) updateIconState(oTab.id, oTab.url || '');
+        }).catch(() => {});
+    });
+}
 
 /* ────────────────────────────────────────────────
  * On-Demand Script Injection
@@ -86,25 +83,23 @@ browserAPI.runtime.onMessage.addListener((pMessage, pSender, pFnSendResponse) =>
 
     if (pMessage.type === 'INJECT_AND_GET_DATA') {
 
-        const iTabId = pMessage.tabId;
+        const nTabId = pMessage.tabId;
         const bForceRefresh = !!pMessage.forceRefresh;
 
-        if (!iTabId) {
+        if (!nTabId) {
             pFnSendResponse({error: 'No tab ID provided.'});
             return true;
         }
 
-        /* Inject content.js via chrome.scripting API */
         browserAPI.scripting.executeScript({
-            target: {tabId: iTabId},
+            target: {tabId: nTabId},
             files: ['js/content.js']
         }).then(() => {
 
             if (bForceRefresh) {
 
-                /* Tell content script to clear data and re-inject nsmain.js */
-                browserAPI.tabs.sendMessage(iTabId, {type: 'FORCE_REFRESH'}, () => {
-
+                browserAPI.tabs.sendMessage(nTabId, {type: 'FORCE_REFRESH'}, () => {
+                    const _ignored = browserAPI.runtime.lastError;
                     pFnSendResponse({success: true});
                 });
             } else {
@@ -123,23 +118,24 @@ browserAPI.runtime.onMessage.addListener((pMessage, pSender, pFnSendResponse) =>
 
     if (pMessage.type === 'INJECT_SCHEDULER') {
 
-        const iTabId = pMessage.tabId;
+        const nTabId = pMessage.tabId;
 
-        if (!iTabId) {
+        if (!nTabId) {
             pFnSendResponse({error: 'No tab ID provided.'});
             return true;
         }
 
         browserAPI.scripting.executeScript({
-            target: {tabId: iTabId},
+            target: {tabId: nTabId},
             files: ['js/content.js']
         }).then(() => {
 
-            browserAPI.tabs.sendMessage(iTabId, {
+            browserAPI.tabs.sendMessage(nTabId, {
                 type: 'SCHEDULER_COMMAND',
                 command: pMessage.command,
                 deployments: pMessage.deployments
             }, () => {
+                const _ignored = browserAPI.runtime.lastError;
                 pFnSendResponse({success: true});
             });
 

@@ -97,15 +97,15 @@
             FILE_HIDE_IN_BUNDLE: {LEVEL: oScriptFileJoin, COLUMN: {fieldId: 'hideinbundle'}},
         };
 
-        const buildAndRun = (pColumnsMap) => {
+        const buildAndRun = () => {
 
-            oQueryObj.columns = [...Object.keys(pColumnsMap).map((sColumn) => {
-                return pColumnsMap[sColumn].LEVEL.createColumn(pUtil.extend(pColumnsMap[sColumn].COLUMN, {alias: sColumn}));
+            oQueryObj.columns = [...Object.keys(oColumnsMap).map((pColumn) => {
+                return oColumnsMap[pColumn].LEVEL.createColumn(pUtil.extend(oColumnsMap[pColumn].COLUMN, {alias: pColumn}));
             })];
 
             oQueryObj.sort = [
                 oScriptJoin.createSort({
-                    column: oQueryObj.columns.find((oCol) => oCol.alias === 'SCRIPT_NAME'),
+                    column: oQueryObj.columns.find((pCol) => pCol.alias === 'SCRIPT_NAME'),
                     ascending: true
                 })
             ];
@@ -116,29 +116,29 @@
         let aResults;
 
         try {
-            aResults = buildAndRun(oColumnsMap);
+            aResults = buildAndRun();
         } catch (e) {
 
             if (String(e).indexOf('hideinbundle') !== -1) {
                 delete oColumnsMap.FILE_HIDE_IN_BUNDLE;
-                aResults = buildAndRun(oColumnsMap);
+                aResults = buildAndRun();
             } else {
                 throw e;
             }
         }
 
-        aResults.forEach((oData) => {
+        aResults.forEach((pData) => {
 
-            oData.INACTIVE = toBoolean(oData.SCRIPT_INACTIVE);
+            pData.INACTIVE = toBoolean(pData.SCRIPT_INACTIVE);
 
-            const sStatus = (oData.STATUS || '').toLowerCase();
-            const bIsDeployed = toBoolean(oData.DEPLOYED);
-            oData.DEPLOYED = bIsDeployed && (sStatus === 'released' || sStatus === 'testing');
+            const sStatus = (pData.STATUS || '').toLowerCase();
+            const bIsDeployed = toBoolean(pData.DEPLOYED);
+            pData.DEPLOYED = bIsDeployed && (sStatus === 'released' || sStatus === 'testing');
 
-            oData.URL = `${sBaseScriptRecordUrl}${oData.SCRIPT}&whence=`;
-            oData.FILE_URL = `${sBaseEditFileUrl.replace('_FILE_ID_', oData.SCRIPT_FILE)}`;
-            oData.INFO = buildInfo(oData.API_VERSION, oData.DESCRIPTION, oData.SCRIPT_FILE_NAME);
-            oData.HIDE_IN_BUNDLE = toBoolean(oData.FILE_HIDE_IN_BUNDLE);
+            pData.URL = `${sBaseScriptRecordUrl}${pData.SCRIPT}&whence=`;
+            pData.FILE_URL = `${sBaseEditFileUrl.replace('_FILE_ID_', pData.SCRIPT_FILE)}`;
+            pData.INFO = buildInfo(pData.API_VERSION, pData.DESCRIPTION, pData.SCRIPT_FILE_NAME);
+            pData.HIDE_IN_BUNDLE = toBoolean(pData.FILE_HIDE_IN_BUNDLE);
         });
 
         return aResults;
@@ -204,7 +204,7 @@
             DESCRIPTION: {name: 'description'},
             STATUS: {name: 'releasestatus'}
         };
-        const aColumns = [...Object.keys(oColumnsMap).map((sColumn) => pSearch.createColumn(oColumnsMap[sColumn]))];
+        const aColumns = [...Object.keys(oColumnsMap).map((pColumn) => pSearch.createColumn(oColumnsMap[pColumn]))];
 
         const aWorkflowsData = [];
 
@@ -212,16 +212,16 @@
             type: 'workflow',
             filters: aFilters,
             columns: aColumns
-        }).run().each((oResult) => {
+        }).run().each((pResult) => {
 
-            const oData = Object.keys(oColumnsMap).reduce((oAccumulator, sColumn) => {
+            const oData = Object.keys(oColumnsMap).reduce((pAccumulator, pColumn) => {
 
-                oAccumulator[sColumn] = oResult.getValue(oColumnsMap[sColumn]);
-                return oAccumulator;
+                pAccumulator[pColumn] = pResult.getValue(oColumnsMap[pColumn]);
+                return pAccumulator;
             }, {});
 
             oData.STATUS = normalizeWorkflowStatus(
-                oResult.getText(oColumnsMap.STATUS) || oResult.getValue(oColumnsMap.STATUS)
+                pResult.getText(oColumnsMap.STATUS) || pResult.getValue(oColumnsMap.STATUS)
             );
 
             oData.URL = `${sBaseWorkflowsUrl}${oData.WORKFLOW}`;
@@ -284,43 +284,43 @@
             return {error: null, data: []};
         }
 
-        oSearchResults.forEach((oResult) => {
+        oSearchResults.forEach((pResult) => {
 
-            const sScriptId = oResult.getValue('script');
-            const sFileId = oResult.getValue('scriptfile', 'script');
-            const sStatus = (oResult.getText('status') || oResult.getValue('status') || '').toLowerCase();
-            const bIsDeployed = oResult.getValue('isdeployed') === 'T';
+            const sScriptId = pResult.getValue('script');
+            const sFileId = pResult.getValue('scriptfile', 'script');
+            const sStatus = (pResult.getText('status') || pResult.getValue('status') || '').toLowerCase();
+            const bIsDeployed = pResult.getValue('isdeployed') === 'T';
             const bDeployed = bIsDeployed && (sStatus === 'released' || sStatus === 'testing');
-            const bScriptInactive = oResult.getValue('isinactive', 'script') === 'T';
+            const bScriptInactive = pResult.getValue('isinactive', 'script') === 'T';
 
             aResults.push({
-                ID: oResult.getId(),
+                ID: pResult.getId(),
                 SCRIPT: sScriptId,
-                DEPLOYMENT_ID: oResult.getValue('scriptid'),
-                SCRIPT_NAME: oResult.getValue('name', 'script') || '',
-                SCRIPT_TYPE: oResult.getText('scripttype', 'script') || oResult.getValue('scripttype', 'script') || 'Unknown',
+                DEPLOYMENT_ID: pResult.getValue('scriptid'),
+                SCRIPT_NAME: pResult.getValue('name', 'script') || '',
+                SCRIPT_TYPE: pResult.getText('scripttype', 'script') || pResult.getValue('scripttype', 'script') || 'Unknown',
                 DEPLOYED: bDeployed,
-                STATUS: oResult.getText('status') || oResult.getValue('status') || '',
+                STATUS: pResult.getText('status') || pResult.getValue('status') || '',
                 INACTIVE: bScriptInactive,
-                API_VERSION: oResult.getText('apiversion', 'script') || oResult.getValue('apiversion', 'script') || '',
-                DESCRIPTION: oResult.getValue('description', 'script') || '',
+                API_VERSION: pResult.getText('apiversion', 'script') || pResult.getValue('apiversion', 'script') || '',
+                DESCRIPTION: pResult.getValue('description', 'script') || '',
                 SCRIPT_FILE: sFileId,
-                SCRIPT_FILE_NAME: oResult.getText('scriptfile', 'script') || '',
+                SCRIPT_FILE_NAME: pResult.getText('scriptfile', 'script') || '',
                 URL: `${sBaseScriptRecordUrl}${sScriptId}&whence=`,
                 FILE_URL: `${sBaseEditFileUrl.replace('_FILE_ID_', sFileId)}`,
                 INFO: buildInfo(
-                    oResult.getText('apiversion', 'script') || oResult.getValue('apiversion', 'script'),
-                    oResult.getValue('description', 'script'),
-                    oResult.getText('scriptfile', 'script')
+                    pResult.getText('apiversion', 'script') || pResult.getValue('apiversion', 'script'),
+                    pResult.getValue('description', 'script'),
+                    pResult.getText('scriptfile', 'script')
                 ),
                 HIDE_IN_BUNDLE: false,
-                BEFORE_LOAD_FN: oResult.getValue('beforeloadfunction', 'script') || '',
-                BEFORE_SUBMIT_FN: oResult.getValue('beforesubmitfunction', 'script') || '',
-                AFTER_SUBMIT_FN: oResult.getValue('aftersubmitfunction', 'script') || '',
-                PAGE_INIT_FN: oResult.getValue('pageinitfunction', 'script') || '',
-                FIELD_CHANGED_FN: oResult.getValue('fieldchangedfunction', 'script') || '',
-                SAVE_RECORD_FN: oResult.getValue('saverecordfunction', 'script') || '',
-                VALIDATE_FIELD_FN: oResult.getValue('validatefieldfunction', 'script') || ''
+                BEFORE_LOAD_FN: pResult.getValue('beforeloadfunction', 'script') || '',
+                BEFORE_SUBMIT_FN: pResult.getValue('beforesubmitfunction', 'script') || '',
+                AFTER_SUBMIT_FN: pResult.getValue('aftersubmitfunction', 'script') || '',
+                PAGE_INIT_FN: pResult.getValue('pageinitfunction', 'script') || '',
+                FIELD_CHANGED_FN: pResult.getValue('fieldchangedfunction', 'script') || '',
+                SAVE_RECORD_FN: pResult.getValue('saverecordfunction', 'script') || '',
+                VALIDATE_FIELD_FN: pResult.getValue('validatefieldfunction', 'script') || ''
             });
         });
 
@@ -358,16 +358,16 @@
             return {error: null, data: []};
         }
 
-        oSearchResults.forEach((oResult) => {
+        oSearchResults.forEach((pResult) => {
 
-            const sWorkflowId = oResult.getId();
+            const sWorkflowId = pResult.getId();
 
             aResults.push({
                 WORKFLOW: sWorkflowId,
-                WORKFLOW_NAME: oResult.getValue('name') || '',
-                DESCRIPTION: oResult.getValue('description') || '',
+                WORKFLOW_NAME: pResult.getValue('name') || '',
+                DESCRIPTION: pResult.getValue('description') || '',
                 STATUS: normalizeWorkflowStatus(
-                    oResult.getText('releasestatus') || oResult.getValue('releasestatus')
+                    pResult.getText('releasestatus') || pResult.getValue('releasestatus')
                 ),
                 URL: `${sBaseWorkflowsUrl}${sWorkflowId}`,
                 EDIT_URL: `${sBaseWorkflowsUrl}${sWorkflowId}&e=T`
@@ -476,7 +476,7 @@
     if (bHasRequire) {
 
         let bDidFail = false;
-        const iFailSafeTimeout = setTimeout(() => {
+        const nFailSafeTimeout = setTimeout(() => {
 
             if (!bDidFail) {
 
@@ -505,7 +505,7 @@
                         return;
                     }
 
-                    clearTimeout(iFailSafeTimeout);
+                    clearTimeout(nFailSafeTimeout);
 
                     const sRecordType = getRecordType(pCurrentRecord);
 
@@ -552,13 +552,13 @@
                         }
                     }, window.location.origin);
                 },
-                (oError) => {
+                (pError) => {
 
                     if (bDidFail) {
                         return;
                     }
 
-                    clearTimeout(iFailSafeTimeout);
+                    clearTimeout(nFailSafeTimeout);
                     bDidFail = true;
 
                     /* Attempt SS 1.0 fallback */
@@ -568,7 +568,7 @@
                         window.postMessage({
                             type: 'SCRIPTS_DATA',
                             error: 'MODULES_LOAD_FAILED',
-                            message: oError.message || 'Unknown error loading NetSuite modules.'
+                            message: pError.message || 'Unknown error loading NetSuite modules.'
                         }, window.location.origin);
                     }
                 });
@@ -577,7 +577,7 @@
 
             if (!bDidFail) {
 
-                clearTimeout(iFailSafeTimeout);
+                clearTimeout(nFailSafeTimeout);
                 bDidFail = true;
 
                 if (bHasNlapi) {

@@ -69,7 +69,7 @@ const runPopupLogic = async () => {
 
     const oGroupOrderList = document.getElementById('groupOrderList');
 
-    let bSpinnerDone = false;
+    let bMinDisplayElapsed = false;
 
     /* ────────────────────────────────────────────────
      * Default Group Order
@@ -123,7 +123,7 @@ const runPopupLogic = async () => {
      */
     const hideSpinner = () => {
 
-        if (!bSpinnerDone) {
+        if (!bMinDisplayElapsed) {
             return;
         }
 
@@ -147,7 +147,7 @@ const runPopupLogic = async () => {
             oMessage.classList.add('error');
         }
 
-        bSpinnerDone = true;
+        bMinDisplayElapsed = true;
         hideSpinner();
     };
 
@@ -156,10 +156,10 @@ const runPopupLogic = async () => {
      */
     const resetSpinner = () => {
 
-        oCardsContainer.innerHTML = '';
+        oCardsContainer.replaceChildren();
         oMessage.classList.remove('visible', 'error');
         oSpinner.classList.remove('hidden');
-        bSpinnerDone = false;
+        bMinDisplayElapsed = false;
         bStackOrderAvailable = false;
     };
 
@@ -167,13 +167,9 @@ const runPopupLogic = async () => {
      * Restore Settings from Storage
      * ──────────────────────────────────────────────── */
 
-    const oStoredSettings = await new Promise((resolve) => {
-
-        chrome.storage.local.get(
-            ['compactMode', 'darkMode', 'deployedOnly', 'sortOrder', 'groupOrder', 'sm_popupWidth', 'sm_popupHeight'],
-            resolve
-        );
-    });
+    const oStoredSettings = await chrome.storage.local.get(
+        ['compactMode', 'darkMode', 'deployedOnly', 'sortOrder', 'groupOrder', 'sm_popupWidth', 'sm_popupHeight']
+    ).catch(() => ({}));
 
     if (oStoredSettings.compactMode) {
         document.body.classList.add('sm-compact');
@@ -214,9 +210,9 @@ const runPopupLogic = async () => {
 
     const oRoot = document.documentElement;
 
-    const setPopupSize = (nW, nH) => {
-        const sW = nW + 'px';
-        const sH = nH + 'px';
+    const setPopupSize = (pWidth, pHeight) => {
+        const sW = pWidth + 'px';
+        const sH = pHeight + 'px';
         oRoot.style.setProperty('--sm-width', sW);
         oRoot.style.width = sW;
         oRoot.style.maxWidth = sW;
@@ -235,21 +231,21 @@ const runPopupLogic = async () => {
         let bDragging = false;
         let nStartX, nStartY, nStartW, nStartH;
 
-        oResizeHandle.addEventListener('mousedown', (e) => {
-            e.preventDefault();
+        oResizeHandle.addEventListener('mousedown', (pEvent) => {
+            pEvent.preventDefault();
             bDragging = true;
-            nStartX = e.screenX;
-            nStartY = e.screenY;
+            nStartX = pEvent.screenX;
+            nStartY = pEvent.screenY;
             nStartW = oRoot.offsetWidth;
             nStartH = oRoot.offsetHeight;
             document.body.classList.add('sm-resizing');
             oResizeHandle.classList.add('dragging');
         });
 
-        document.addEventListener('mousemove', (e) => {
+        document.addEventListener('mousemove', (pEvent) => {
             if (!bDragging) return;
-            const nNewW = Math.min(Math.max(nStartW - (e.screenX - nStartX), nMinWidth), nMaxWidth);
-            const nNewH = Math.min(Math.max(nStartH + (e.screenY - nStartY), nMinHeight), nMaxHeight);
+            const nNewW = Math.min(Math.max(nStartW - (pEvent.screenX - nStartX), nMinWidth), nMaxWidth);
+            const nNewH = Math.min(Math.max(nStartH + (pEvent.screenY - nStartY), nMinHeight), nMaxHeight);
             setPopupSize(nNewW, nNewH);
         });
 
@@ -261,7 +257,7 @@ const runPopupLogic = async () => {
             chrome.storage.local.set({
                 sm_popupWidth: oRoot.offsetWidth,
                 sm_popupHeight: oRoot.offsetHeight
-            });
+            }).catch(() => {});
         });
     }
 
@@ -300,14 +296,14 @@ const runPopupLogic = async () => {
         const oDoc = oParser.parseFromString(sHtml, 'text/html');
 
         const oStackMap = new Map();
-        let iOrder = 0;
+        let nOrder = 0;
 
         const aLayers = ['server', 'client', 'serverlocalized', 'clientlocalized'];
 
-        aLayers.forEach((sLayer) => {
+        aLayers.forEach((pLayer) => {
 
             const oContainer = oDoc.querySelector(
-                `[data-nsps-layer="${sLayer}"] .uir-machine-table-container`
+                `[data-nsps-layer="${pLayer}"] .uir-machine-table-container`
             );
 
             if (!oContainer) {
@@ -316,15 +312,15 @@ const runPopupLogic = async () => {
 
             const aLinks = oContainer.querySelectorAll('a[href*="script.nl?id="]');
 
-            aLinks.forEach((oLink) => {
+            aLinks.forEach((pLink) => {
 
-                const oMatch = oLink.href.match(/script\.nl\?id=(\d+)/);
+                const oMatch = pLink.href.match(/script\.nl\?id=(\d+)/);
 
                 if (oMatch) {
                     const sScriptId = oMatch[1];
 
                     if (!oStackMap.has(sScriptId)) {
-                        oStackMap.set(sScriptId, iOrder++);
+                        oStackMap.set(sScriptId, nOrder++);
                     }
                 }
             });
@@ -341,14 +337,14 @@ const runPopupLogic = async () => {
      */
     const applyStackOrder = (pScriptsData, pStackMap) => {
 
-        const iFallback = pStackMap.size;
+        const nFallback = pStackMap.size;
 
-        pScriptsData.forEach((oScript) => {
+        pScriptsData.forEach((pScript) => {
 
-            const sScriptId = String(oScript.SCRIPT);
-            oScript.STACK_ORDER = pStackMap.has(sScriptId)
+            const sScriptId = String(pScript.SCRIPT);
+            pScript.STACK_ORDER = pStackMap.has(sScriptId)
                 ? pStackMap.get(sScriptId)
-                : iFallback;
+                : nFallback;
         });
     };
 
@@ -490,18 +486,18 @@ const runPopupLogic = async () => {
             {key: 'VALIDATE_FIELD_FN', label: 'validateField'},
         ];
 
-        const aActiveHooks = aHookDefs.filter((oDef) => pScript[oDef.key]);
+        const aActiveHooks = aHookDefs.filter((pDef) => pScript[pDef.key]);
 
         if (aActiveHooks.length > 0) {
 
             const oHooks = document.createElement('div');
             oHooks.className = 'card-hooks';
 
-            aActiveHooks.forEach((oDef) => {
+            aActiveHooks.forEach((pDef) => {
 
                 const oTag = document.createElement('span');
                 oTag.className = 'sm-hook-tag';
-                oTag.textContent = oDef.label;
+                oTag.textContent = pDef.label;
                 oHooks.appendChild(oTag);
             });
 
@@ -621,24 +617,24 @@ const runPopupLogic = async () => {
 
         /* Count Warning Badge */
         const sTypeLower = pType.toLowerCase();
-        const iCount = pScripts.length;
+        const nCount = pScripts.length;
         const sClientDocsUrl = 'https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_N3949604.html';
         const sUeDocsUrl = 'https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_N3361453.html';
 
-        if (sTypeLower === 'client' && iCount >= 8) {
+        if (sTypeLower === 'client' && nCount >= 8) {
 
             const oWarn = document.createElement('span');
             oWarn.className = 'sm-count-warn';
 
             let sTooltipText;
 
-            if (iCount >= 10) {
+            if (nCount >= 10) {
                 oWarn.classList.add('danger');
                 oWarn.textContent = 'LIMIT';
                 sTooltipText = 'By default, a maximum of 10 Client scripts can be deployed per record. Scripts beyond this limit will not execute.';
             } else {
                 oWarn.classList.add('warn');
-                oWarn.textContent = iCount;
+                oWarn.textContent = nCount;
                 sTooltipText = 'Approaching the default limit of 10 Client scripts per record.';
             }
 
@@ -653,17 +649,17 @@ const runPopupLogic = async () => {
             oTipLink.href = sClientDocsUrl;
             oTipLink.target = '_blank';
             oTipLink.textContent = 'Client Script Deployment Limit';
-            oTipLink.addEventListener('click', (e) => e.stopPropagation());
+            oTipLink.addEventListener('click', (pEvent) => pEvent.stopPropagation());
             oTip.appendChild(oTipLink);
 
             oWarn.appendChild(oTip);
             oHeader.appendChild(oWarn);
 
-        } else if (sTypeLower === 'user event' && iCount >= 10) {
+        } else if (sTypeLower === 'user event' && nCount >= 10) {
 
             const oWarn = document.createElement('span');
             oWarn.className = 'sm-count-warn warn';
-            oWarn.textContent = iCount;
+            oWarn.textContent = nCount;
 
             const oTip = document.createElement('div');
             oTip.className = 'sm-warn-tooltip';
@@ -676,7 +672,7 @@ const runPopupLogic = async () => {
             oTipLink.href = sUeDocsUrl;
             oTipLink.target = '_blank';
             oTipLink.textContent = 'User Event Script Best Practices';
-            oTipLink.addEventListener('click', (e) => e.stopPropagation());
+            oTipLink.addEventListener('click', (pEvent) => pEvent.stopPropagation());
             oTip.appendChild(oTipLink);
 
             oWarn.appendChild(oTip);
@@ -689,9 +685,9 @@ const runPopupLogic = async () => {
         const oBody = document.createElement('div');
         oBody.className = 'section-body';
 
-        pScripts.forEach((oScript) => {
+        pScripts.forEach((pScript) => {
 
-            oBody.appendChild(createScriptCard(oScript));
+            oBody.appendChild(createScriptCard(pScript));
         });
 
         /* Toggle collapse on header click */
@@ -718,9 +714,9 @@ const runPopupLogic = async () => {
         const aSorted = [...pWorkflows];
 
         if (pSortOrder === 'asc') {
-            aSorted.sort((a, b) => (a.WORKFLOW_NAME || '').localeCompare(b.WORKFLOW_NAME || ''));
+            aSorted.sort((pA, pB) => (pA.WORKFLOW_NAME || '').localeCompare(pB.WORKFLOW_NAME || ''));
         } else if (pSortOrder === 'desc') {
-            aSorted.sort((a, b) => (b.WORKFLOW_NAME || '').localeCompare(a.WORKFLOW_NAME || ''));
+            aSorted.sort((pA, pB) => (pB.WORKFLOW_NAME || '').localeCompare(pA.WORKFLOW_NAME || ''));
         }
 
         /* Section Header */
@@ -743,9 +739,9 @@ const runPopupLogic = async () => {
         const oBody = document.createElement('div');
         oBody.className = 'section-body';
 
-        aSorted.forEach((oWorkflow) => {
+        aSorted.forEach((pWorkflow) => {
 
-            oBody.appendChild(createWorkflowCard(oWorkflow));
+            oBody.appendChild(createWorkflowCard(pWorkflow));
         });
 
         /* Toggle collapse on header click */
@@ -771,19 +767,19 @@ const runPopupLogic = async () => {
         const aRemaining = [...pKeys];
 
         /* Add keys in the saved order */
-        aGroupOrder.forEach((sGroup) => {
+        aGroupOrder.forEach((pGroup) => {
 
-            const iIdx = aRemaining.findIndex((pKey) =>
-                pKey.toLowerCase() === sGroup.toLowerCase()
+            const nIdx = aRemaining.findIndex((pKey) =>
+                pKey.toLowerCase() === pGroup.toLowerCase()
             );
 
-            if (iIdx !== -1) {
-                aOrdered.push(aRemaining.splice(iIdx, 1)[0]);
+            if (nIdx !== -1) {
+                aOrdered.push(aRemaining.splice(nIdx, 1)[0]);
             }
         });
 
         /* Append any unknown groups alphabetically */
-        aRemaining.sort((a, b) => a.localeCompare(b));
+        aRemaining.sort((pA, pB) => pA.localeCompare(pB));
         aOrdered.push(...aRemaining);
 
         /* If there are new groups not in aGroupOrder, add them for future ordering */
@@ -794,15 +790,15 @@ const runPopupLogic = async () => {
         if (aNewGroups.length > 0) {
 
             /* Insert before "Workflows" if it exists, otherwise append */
-            const iWfIdx = aGroupOrder.findIndex((g) => g.toLowerCase() === 'workflows');
+            const nWfIdx = aGroupOrder.findIndex((pGroup) => pGroup.toLowerCase() === 'workflows');
 
-            if (iWfIdx !== -1) {
-                aGroupOrder.splice(iWfIdx, 0, ...aNewGroups);
+            if (nWfIdx !== -1) {
+                aGroupOrder.splice(nWfIdx, 0, ...aNewGroups);
             } else {
                 aGroupOrder.push(...aNewGroups);
             }
 
-            chrome.storage.local.set({groupOrder: aGroupOrder});
+            chrome.storage.local.set({groupOrder: aGroupOrder}).catch(() => {});
         }
 
         return aOrdered;
@@ -829,10 +825,10 @@ const runPopupLogic = async () => {
                 return pGroupedScripts;
             }
 
-            Object.keys(pGroupedScripts).forEach((sKey) => {
+            Object.keys(pGroupedScripts).forEach((pKey) => {
 
-                oSorted[sKey] = [...pGroupedScripts[sKey]].sort((a, b) => {
-                    return (a.STACK_ORDER ?? Number.MAX_SAFE_INTEGER) - (b.STACK_ORDER ?? Number.MAX_SAFE_INTEGER);
+                oSorted[pKey] = [...pGroupedScripts[pKey]].sort((pA, pB) => {
+                    return (pA.STACK_ORDER ?? Number.MAX_SAFE_INTEGER) - (pB.STACK_ORDER ?? Number.MAX_SAFE_INTEGER);
                 });
             });
 
@@ -841,12 +837,12 @@ const runPopupLogic = async () => {
 
         const bAscending = pSortOrder === 'asc';
 
-        Object.keys(pGroupedScripts).forEach((sKey) => {
+        Object.keys(pGroupedScripts).forEach((pKey) => {
 
-            oSorted[sKey] = [...pGroupedScripts[sKey]].sort((a, b) => {
+            oSorted[pKey] = [...pGroupedScripts[pKey]].sort((pA, pB) => {
 
-                const sNameA = (a.SCRIPT_NAME || '').toLowerCase();
-                const sNameB = (b.SCRIPT_NAME || '').toLowerCase();
+                const sNameA = (pA.SCRIPT_NAME || '').toLowerCase();
+                const sNameB = (pB.SCRIPT_NAME || '').toLowerCase();
 
                 return bAscending
                     ? sNameA.localeCompare(sNameB)
@@ -875,17 +871,17 @@ const runPopupLogic = async () => {
             : pScriptsData;
 
         const aFilteredWorkflows = bShowOnlyDeployed
-            ? pWorkflowsData.filter((oWorkflow) => {
-                const sStatus = (oWorkflow.STATUS || '').toLowerCase();
+            ? pWorkflowsData.filter((pWorkflow) => {
+                const sStatus = (pWorkflow.STATUS || '').toLowerCase();
                 return sStatus === 'released';
             })
             : pWorkflowsData;
 
         /* Group scripts by type */
-        let oGroupedScripts = aFilteredScripts.reduce((acc, oScriptObj) => {
+        let oGroupedScripts = aFilteredScripts.reduce((pAcc, pScriptObj) => {
 
-            (acc[oScriptObj.SCRIPT_TYPE] = acc[oScriptObj.SCRIPT_TYPE] || []).push(oScriptObj);
-            return acc;
+            (pAcc[pScriptObj.SCRIPT_TYPE] = pAcc[pScriptObj.SCRIPT_TYPE] || []).push(pScriptObj);
+            return pAcc;
         }, {});
 
         /* Apply name sort within groups */
@@ -910,15 +906,15 @@ const runPopupLogic = async () => {
         const oFragment = document.createDocumentFragment();
         let bRenderedAnything = false;
 
-        aOrderedKeys.forEach((sKey) => {
+        aOrderedKeys.forEach((pKey) => {
 
-            if (sKey === 'Workflows') {
+            if (pKey === 'Workflows') {
                 if (bHasWorkflows) {
                     renderWorkflowSection(oFragment, aFilteredWorkflows, sSortOrder);
                     bRenderedAnything = true;
                 }
-            } else if (oGroupedScripts[sKey]) {
-                renderScriptSection(oFragment, sKey, oGroupedScripts[sKey]);
+            } else if (oGroupedScripts[pKey]) {
+                renderScriptSection(oFragment, pKey, oGroupedScripts[pKey]);
                 bRenderedAnything = true;
             }
         });
@@ -951,7 +947,7 @@ const runPopupLogic = async () => {
         }
 
         oCardsContainer.appendChild(oFragment);
-        bSpinnerDone = true;
+        bMinDisplayElapsed = true;
         hideSpinner();
         oMessage.classList.remove('visible');
     };
@@ -966,7 +962,7 @@ const runPopupLogic = async () => {
         }
 
         const {SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR} = oLastData;
-        oCardsContainer.innerHTML = '';
+        oCardsContainer.replaceChildren();
         oMessage.classList.remove('visible');
         renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
     };
@@ -980,14 +976,14 @@ const runPopupLogic = async () => {
             return;
         }
 
-        oGroupOrderList.innerHTML = '';
+        oGroupOrderList.replaceChildren();
 
-        aGroupOrder.forEach((sGroup, iIndex) => {
+        aGroupOrder.forEach((pGroup, pIndex) => {
 
             const oItem = document.createElement('div');
             oItem.className = 'sm-order-item';
             oItem.draggable = true;
-            oItem.dataset.index = iIndex;
+            oItem.dataset.index = pIndex;
 
             const oDragHandle = document.createElement('span');
             oDragHandle.className = 'sm-drag-handle';
@@ -996,17 +992,17 @@ const runPopupLogic = async () => {
 
             const oGroupLabel = document.createElement('span');
             oGroupLabel.className = 'sm-order-label';
-            oGroupLabel.textContent = sGroup;
+            oGroupLabel.textContent = pGroup;
 
             oItem.appendChild(oDragHandle);
             oItem.appendChild(oGroupLabel);
 
             /* ── HTML5 Drag & Drop Events ── */
 
-            oItem.addEventListener('dragstart', (e) => {
+            oItem.addEventListener('dragstart', (pEvent) => {
 
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', iIndex);
+                pEvent.dataTransfer.effectAllowed = 'move';
+                pEvent.dataTransfer.setData('text/plain', pIndex);
                 oItem.classList.add('dragging');
             });
 
@@ -1018,10 +1014,10 @@ const runPopupLogic = async () => {
                 });
             });
 
-            oItem.addEventListener('dragover', (e) => {
+            oItem.addEventListener('dragover', (pEvent) => {
 
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
+                pEvent.preventDefault();
+                pEvent.dataTransfer.dropEffect = 'move';
                 oItem.classList.add('drag-over');
             });
 
@@ -1030,24 +1026,24 @@ const runPopupLogic = async () => {
                 oItem.classList.remove('drag-over');
             });
 
-            oItem.addEventListener('drop', (e) => {
+            oItem.addEventListener('drop', (pEvent) => {
 
-                e.preventDefault();
+                pEvent.preventDefault();
                 oItem.classList.remove('drag-over');
 
-                const iFromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
-                const iToIndex = parseInt(oItem.dataset.index, 10);
+                const nFromIndex = parseInt(pEvent.dataTransfer.getData('text/plain'), 10);
+                const nToIndex = parseInt(oItem.dataset.index, 10);
 
-                if (iFromIndex === iToIndex) {
+                if (nFromIndex === nToIndex) {
                     return;
                 }
 
                 /* Reorder the array */
-                const [oMoved] = aGroupOrder.splice(iFromIndex, 1);
-                aGroupOrder.splice(iToIndex, 0, oMoved);
+                const [oMoved] = aGroupOrder.splice(nFromIndex, 1);
+                aGroupOrder.splice(nToIndex, 0, oMoved);
 
                 /* Persist and re-render */
-                chrome.storage.local.set({groupOrder: aGroupOrder});
+                chrome.storage.local.set({groupOrder: aGroupOrder}).catch(() => {});
                 renderGroupOrderList();
                 rerenderFromData();
             });
@@ -1065,7 +1061,7 @@ const runPopupLogic = async () => {
         oCompactToggle.classList.toggle('active');
         const bActive = oCompactToggle.classList.contains('active');
         document.body.classList.toggle('sm-compact', bActive);
-        chrome.storage.local.set({compactMode: bActive});
+        chrome.storage.local.set({compactMode: bActive}).catch(() => {});
     });
 
     oDarkToggle?.addEventListener('click', () => {
@@ -1073,20 +1069,20 @@ const runPopupLogic = async () => {
         oDarkToggle.classList.toggle('active');
         const bActive = oDarkToggle.classList.contains('active');
         document.body.classList.toggle('theme-dark', bActive);
-        chrome.storage.local.set({darkMode: bActive});
+        chrome.storage.local.set({darkMode: bActive}).catch(() => {});
     });
 
     oDeployedToggle?.addEventListener('click', () => {
 
         oDeployedToggle.classList.toggle('active');
         const bActive = oDeployedToggle.classList.contains('active');
-        chrome.storage.local.set({deployedOnly: bActive});
+        chrome.storage.local.set({deployedOnly: bActive}).catch(() => {});
         rerenderFromData();
     });
 
     oSortSelect?.addEventListener('change', () => {
 
-        chrome.storage.local.set({sortOrder: oSortSelect.value});
+        chrome.storage.local.set({sortOrder: oSortSelect.value}).catch(() => {});
         rerenderFromData();
     });
 
@@ -1136,7 +1132,7 @@ const runPopupLogic = async () => {
                 return 'production';
             }
 
-        } catch (e) {
+        } catch (pErr) {
             /* ignore */
         }
 
@@ -1162,7 +1158,7 @@ const runPopupLogic = async () => {
             const sHost = new URL(pUrl).hostname;
             const sSubdomain = sHost.split('.')[0] || '';
             return sSubdomain.replace(/[-_](sb\d*|rp)$/i, '') || null;
-        } catch (e) {
+        } catch (pErr) {
             return null;
         }
     };
@@ -1228,9 +1224,9 @@ const runPopupLogic = async () => {
      */
     const renderSchedulerStoredData = async (pStatusMap) => {
 
-        const oStored = await new Promise((resolve) => {
-            chrome.storage.local.get(['scheduledDeployments', 'scheduledCollectedAt', 'scheduledCollectedFrom', 'scheduledAccountId'], resolve);
-        });
+        const oStored = await chrome.storage.local.get(
+            ['scheduledDeployments', 'scheduledCollectedAt', 'scheduledCollectedFrom', 'scheduledAccountId']
+        ).catch(() => ({}));
 
         const aDeployments = oStored.scheduledDeployments || [];
         const sCollectedAt = oStored.scheduledCollectedAt || '';
@@ -1267,12 +1263,12 @@ const runPopupLogic = async () => {
         oSchedulerClearBtn.disabled = false;
         oSchedulerListHeader.style.display = 'flex';
 
-        aDeployments.forEach((oDep) => {
+        aDeployments.forEach((pDep) => {
 
             const oItem = document.createElement('div');
             oItem.className = 'sm-sched-item';
 
-            const sCurrentStatus = pStatusMap ? pStatusMap[oDep.internalId] : null;
+            const sCurrentStatus = pStatusMap ? pStatusMap[pDep.internalId] : null;
             const bAlreadyScheduled = sCurrentStatus === 'SCHEDULED';
             const bBlocked = sCurrentStatus === 'UNDEPLOYED' || sCurrentStatus === 'INACTIVE_SCRIPT';
 
@@ -1283,7 +1279,7 @@ const runPopupLogic = async () => {
             const oCheckbox = document.createElement('input');
             oCheckbox.type = 'checkbox';
             oCheckbox.className = 'sm-sched-cb';
-            oCheckbox.dataset.internalId = oDep.internalId;
+            oCheckbox.dataset.internalId = pDep.internalId;
             oCheckbox.checked = !bAlreadyScheduled && !bBlocked;
 
             if (bBlocked) {
@@ -1297,12 +1293,12 @@ const runPopupLogic = async () => {
 
             const oName = document.createElement('span');
             oName.className = 'sm-sched-item-name';
-            oName.textContent = oDep.title || oDep.scriptName || oDep.deploymentId;
-            oName.title = (oDep.scriptName || '') + ' / ' + (oDep.title || '');
+            oName.textContent = pDep.title || pDep.scriptName || pDep.deploymentId;
+            oName.title = (pDep.scriptName || '') + ' / ' + (pDep.title || '');
 
             const oId = document.createElement('span');
             oId.className = 'sm-sched-item-id';
-            oId.textContent = oDep.deploymentId;
+            oId.textContent = pDep.deploymentId;
 
             oInfo.appendChild(oName);
             oInfo.appendChild(oId);
@@ -1348,11 +1344,11 @@ const runPopupLogic = async () => {
         oSchedulerList.replaceChildren();
         oSchedulerListHeader.style.display = 'none';
 
-        aSelected.forEach((oDep) => {
+        aSelected.forEach((pDep) => {
 
             const oItem = document.createElement('div');
             oItem.className = 'sm-sched-item';
-            oItem.dataset.internalId = oDep.internalId;
+            oItem.dataset.internalId = pDep.internalId;
 
             const oStatusIcon = document.createElement('span');
             oStatusIcon.className = 'sm-sched-item-status pending';
@@ -1365,11 +1361,11 @@ const runPopupLogic = async () => {
 
             const oName = document.createElement('span');
             oName.className = 'sm-sched-item-name';
-            oName.textContent = oDep.title || oDep.scriptName || oDep.deploymentId;
+            oName.textContent = pDep.title || pDep.scriptName || pDep.deploymentId;
 
             const oId = document.createElement('span');
             oId.className = 'sm-sched-item-id';
-            oId.textContent = oDep.deploymentId;
+            oId.textContent = pDep.deploymentId;
 
             oInfo.appendChild(oName);
             oInfo.appendChild(oId);
@@ -1383,11 +1379,11 @@ const runPopupLogic = async () => {
     /**
      * Updates a single row in the apply list from spinner to result icon.
      *
-     * @param {Object} oResult
+     * @param {Object} pResult
      */
-    const updateApplyRow = (oResult) => {
+    const updateApplyRow = (pResult) => {
 
-        const sLookupId = oResult.originalInternalId || oResult.internalId;
+        const sLookupId = pResult.originalInternalId || pResult.internalId;
         const oItem = oSchedulerList.querySelector('[data-internal-id="' + sLookupId + '"]');
 
         if (!oItem) {
@@ -1403,16 +1399,16 @@ const runPopupLogic = async () => {
         const oStatusIcon = document.createElement('span');
         oStatusIcon.className = 'sm-sched-item-status';
 
-        if (oResult.success) {
+        if (pResult.success) {
             oStatusIcon.classList.add('ok');
             oStatusIcon.appendChild(createSvgIcon('ico-check'));
-            oStatusIcon.title = oResult.fallback
+            oStatusIcon.title = pResult.fallback
                 ? 'Applied via script ID lookup (ID mismatch)'
                 : 'Applied';
         } else {
             oStatusIcon.classList.add('fail');
             oStatusIcon.appendChild(createSvgIcon('ico-x'));
-            oStatusIcon.title = oResult.error || 'Failed';
+            oStatusIcon.title = pResult.error || 'Failed';
         }
 
         oOldStatus.replaceWith(oStatusIcon);
@@ -1421,25 +1417,25 @@ const runPopupLogic = async () => {
     /**
      * Updates the status bar summary during/after apply.
      *
-     * @param {number} iProcessed
-     * @param {number} iTotal
-     * @param {number} iSuccess
-     * @param {number} iFailed
+     * @param {number} pProcessed
+     * @param {number} pTotal
+     * @param {number} pSuccess
+     * @param {number} pFailed
      */
-    const updateApplyStatus = (iProcessed, iTotal, iSuccess, iFailed) => {
+    const updateApplyStatus = (pProcessed, pTotal, pSuccess, pFailed) => {
 
-        if (iProcessed < iTotal) {
-            oSchedulerStatus.textContent = 'Applying... ' + iProcessed + ' / ' + iTotal;
+        if (pProcessed < pTotal) {
+            oSchedulerStatus.textContent = 'Applying... ' + pProcessed + ' / ' + pTotal;
             oSchedulerStatus.className = 'sm-scheduler-status';
             return;
         }
 
         const aParts = [];
-        if (iSuccess > 0) aParts.push(iSuccess + ' applied');
-        if (iFailed > 0) aParts.push(iFailed + ' failed');
+        if (pSuccess > 0) aParts.push(pSuccess + ' applied');
+        if (pFailed > 0) aParts.push(pFailed + ' failed');
 
         oSchedulerStatus.textContent = aParts.join(', ');
-        oSchedulerStatus.className = 'sm-scheduler-status' + (iFailed > 0 ? ' error' : ' success');
+        oSchedulerStatus.className = 'sm-scheduler-status' + (pFailed > 0 ? ' error' : ' success');
     };
 
     /**
@@ -1452,7 +1448,7 @@ const runPopupLogic = async () => {
         oSchedulerStatus.textContent = aApplyErrors.length + ' error(s)';
         oSchedulerStatus.className = 'sm-scheduler-status error';
 
-        aApplyErrors.forEach((oErr) => {
+        aApplyErrors.forEach((pErr) => {
 
             const oItem = document.createElement('div');
             oItem.className = 'sm-sched-item';
@@ -1466,12 +1462,12 @@ const runPopupLogic = async () => {
 
             const oName = document.createElement('span');
             oName.className = 'sm-sched-item-name';
-            oName.textContent = oErr.title || oErr.scriptName || oErr.deploymentId;
-            oName.title = oErr.error || 'Unknown error';
+            oName.textContent = pErr.title || pErr.scriptName || pErr.deploymentId;
+            oName.title = pErr.error || 'Unknown error';
 
             const oDetail = document.createElement('span');
             oDetail.className = 'sm-sched-item-error';
-            oDetail.textContent = oErr.error || 'Unknown error';
+            oDetail.textContent = pErr.error || 'Unknown error';
 
             oInfo.appendChild(oName);
             oInfo.appendChild(oDetail);
@@ -1499,18 +1495,18 @@ const runPopupLogic = async () => {
 
         for (let i = 0; i < pMaxRetries; i++) {
 
-            await new Promise((resolve) => setTimeout(resolve, pIntervalMs));
+            await new Promise((pResolve) => setTimeout(pResolve, pIntervalMs));
 
             try {
 
-                const oResponse = await new Promise((resolve) => {
+                const oResponse = await new Promise((pResolve) => {
 
-                    chrome.tabs.sendMessage(pTabId, {type: 'GET_SCHEDULER_RESULT', expectedType: pExpectedType}, (response) => {
+                    chrome.tabs.sendMessage(pTabId, {type: 'GET_SCHEDULER_RESULT', expectedType: pExpectedType}, (pResponse) => {
 
                         if (chrome.runtime.lastError) {
-                            resolve(null);
+                            pResolve(null);
                         } else {
-                            resolve(response);
+                            pResolve(pResponse);
                         }
                     });
                 });
@@ -1519,7 +1515,7 @@ const runPopupLogic = async () => {
                     return oResponse;
                 }
 
-            } catch (e) {
+            } catch (pErr) {
                 /* Retry */
             }
         }
@@ -1592,7 +1588,7 @@ const runPopupLogic = async () => {
             'Recreate TBA tokens and OAuth credentials for any integrations you do need active'
         ];
 
-        oSchedulerWarning.innerHTML = '';
+        oSchedulerWarning.replaceChildren();
 
         /* Header */
         const oHeader = document.createElement('div');
@@ -1675,20 +1671,20 @@ const runPopupLogic = async () => {
         oRiskList.className = 'sm-warning-risks';
         oRiskList.style.display = 'none';
 
-        aRisks.forEach((oRisk) => {
+        aRisks.forEach((pRisk) => {
             const oEl = document.createElement('div');
-            oEl.className = 'sm-warning-risk ' + oRisk.severity;
+            oEl.className = 'sm-warning-risk ' + pRisk.severity;
 
             const oRiskTitle = document.createElement('div');
             oRiskTitle.className = 'sm-warning-risk-title';
             const oDot = document.createElement('span');
-            oDot.className = 'sm-warning-dot ' + oRisk.severity;
+            oDot.className = 'sm-warning-dot ' + pRisk.severity;
             oRiskTitle.appendChild(oDot);
-            oRiskTitle.append(' ' + oRisk.title);
+            oRiskTitle.append(' ' + pRisk.title);
 
             const oRiskDesc = document.createElement('div');
             oRiskDesc.className = 'sm-warning-risk-desc';
-            oRiskDesc.textContent = oRisk.desc;
+            oRiskDesc.textContent = pRisk.desc;
 
             oEl.appendChild(oRiskTitle);
             oEl.appendChild(oRiskDesc);
@@ -1734,7 +1730,7 @@ const runPopupLogic = async () => {
 
         const aCheckboxes = [];
 
-        aChecklist.forEach((sItem) => {
+        aChecklist.forEach((pItem) => {
             const oLabel = document.createElement('label');
             oLabel.className = 'sm-warning-check';
 
@@ -1745,7 +1741,7 @@ const runPopupLogic = async () => {
 
             const oText = document.createElement('span');
             oText.className = 'sm-warning-check-text';
-            oText.textContent = sItem;
+            oText.textContent = pItem;
 
             oCb.addEventListener('change', () => {
                 oText.classList.toggle('checked', oCb.checked);
@@ -1820,9 +1816,7 @@ const runPopupLogic = async () => {
         oMessage.classList.remove('visible');
         oSchedulerBtn.classList.add('active');
 
-        const oStored = await new Promise((resolve) => {
-            chrome.storage.local.get(['scheduledDeployments'], resolve);
-        });
+        const oStored = await chrome.storage.local.get(['scheduledDeployments']).catch(() => ({}));
 
         const bHasData = oStored.scheduledDeployments && oStored.scheduledDeployments.length > 0;
 
@@ -1839,8 +1833,8 @@ const runPopupLogic = async () => {
 
         const bChecked = oSchedulerSelectAll.checked;
 
-        oSchedulerList.querySelectorAll('.sm-sched-cb:not(:disabled)').forEach((oCb) => {
-            oCb.checked = bChecked;
+        oSchedulerList.querySelectorAll('.sm-sched-cb:not(:disabled)').forEach((pCb) => {
+            pCb.checked = bChecked;
         });
 
         updateSelectedCount();
@@ -1892,21 +1886,19 @@ const runPopupLogic = async () => {
             const aDeployments = oResult.data || [];
             const sNow = new Date().toLocaleString();
 
-            await new Promise((resolve) => {
-                chrome.storage.local.set({
-                    scheduledDeployments: aDeployments,
-                    scheduledCollectedAt: sNow,
-                    scheduledCollectedFrom: sCurrentEnv,
-                    scheduledAccountId: extractBaseAccountId(oTab?.url)
-                }, resolve);
-            });
+            await chrome.storage.local.set({
+                scheduledDeployments: aDeployments,
+                scheduledCollectedAt: sNow,
+                scheduledCollectedFrom: sCurrentEnv,
+                scheduledAccountId: extractBaseAccountId(oTab?.url)
+            }).catch(() => {});
 
             await renderSchedulerStoredData();
             oSchedulerStatus.textContent = 'Collected ' + aDeployments.length + ' deployments.';
             oSchedulerStatus.className = 'sm-scheduler-status success';
 
-        } catch (e) {
-            oSchedulerStatus.textContent = 'Error: ' + e.message;
+        } catch (pErr) {
+            oSchedulerStatus.textContent = 'Error: ' + pErr.message;
             oSchedulerStatus.className = 'sm-scheduler-status error';
         }
 
@@ -1919,9 +1911,7 @@ const runPopupLogic = async () => {
             return;
         }
 
-        const oStored = await new Promise((resolve) => {
-            chrome.storage.local.get(['scheduledDeployments'], resolve);
-        });
+        const oStored = await chrome.storage.local.get(['scheduledDeployments']).catch(() => ({}));
 
         const aDeployments = oStored.scheduledDeployments || [];
 
@@ -1970,20 +1960,20 @@ const runPopupLogic = async () => {
             await renderSchedulerStoredData(oStatusMap);
 
             const aStatuses = Object.values(oStatusMap);
-            const iScheduled = aStatuses.filter((s) => s === 'SCHEDULED').length;
-            const iBlocked = aStatuses.filter((s) => s === 'UNDEPLOYED' || s === 'INACTIVE_SCRIPT').length;
-            const iTotal = aDeployments.length;
-            const iRelevant = iTotal - iBlocked;
+            const nScheduled = aStatuses.filter((pStatus) => pStatus === 'SCHEDULED').length;
+            const nBlocked = aStatuses.filter((pStatus) => pStatus === 'UNDEPLOYED' || pStatus === 'INACTIVE_SCRIPT').length;
+            const nTotal = aDeployments.length;
+            const nRelevant = nTotal - nBlocked;
 
-            let sMsg = iScheduled + ' / ' + iRelevant + ' scheduled';
-            if (iBlocked > 0) {
-                sMsg += ', ' + iBlocked + ' skipped';
+            let sMsg = nScheduled + ' / ' + nRelevant + ' scheduled';
+            if (nBlocked > 0) {
+                sMsg += ', ' + nBlocked + ' skipped';
             }
             oSchedulerStatus.textContent = sMsg;
-            oSchedulerStatus.className = 'sm-scheduler-status' + (iScheduled === iRelevant ? ' success' : '');
+            oSchedulerStatus.className = 'sm-scheduler-status' + (nScheduled === nRelevant ? ' success' : '');
 
-        } catch (e) {
-            oSchedulerStatus.textContent = 'Error: ' + e.message;
+        } catch (pErr) {
+            oSchedulerStatus.textContent = 'Error: ' + pErr.message;
             oSchedulerStatus.className = 'sm-scheduler-status error';
         }
 
@@ -1996,18 +1986,16 @@ const runPopupLogic = async () => {
             return;
         }
 
-        const oStored = await new Promise((resolve) => {
-            chrome.storage.local.get(['scheduledDeployments'], resolve);
-        });
+        const oStored = await chrome.storage.local.get(['scheduledDeployments']).catch(() => ({}));
 
         const aAllDeployments = oStored.scheduledDeployments || [];
         const aCheckedIds = new Set();
 
-        oSchedulerList.querySelectorAll('.sm-sched-cb:checked').forEach((oCb) => {
-            aCheckedIds.add(oCb.dataset.internalId);
+        oSchedulerList.querySelectorAll('.sm-sched-cb:checked').forEach((pCb) => {
+            aCheckedIds.add(pCb.dataset.internalId);
         });
 
-        const aSelected = aAllDeployments.filter((oDep) => aCheckedIds.has(String(oDep.internalId)));
+        const aSelected = aAllDeployments.filter((pDep) => aCheckedIds.has(String(pDep.internalId)));
 
         if (aSelected.length === 0) {
             oSchedulerStatus.textContent = 'No deployments selected.';
@@ -2038,57 +2026,57 @@ const runPopupLogic = async () => {
                 return;
             }
 
-            const iTotal = aSelected.length;
-            let iProcessed = 0;
-            let iSuccess = 0;
-            let iFailed = 0;
+            const nTotal = aSelected.length;
+            let nProcessed = 0;
+            let nSuccess = 0;
+            let nFailed = 0;
             const oSeen = new Set();
 
             for (let i = 0; i < 120; i++) {
 
-                await new Promise((resolve) => setTimeout(resolve, 250));
+                await new Promise((pResolve) => setTimeout(pResolve, 250));
 
                 try {
 
-                    const aProgress = await new Promise((resolve) => {
-                        chrome.tabs.sendMessage(oTab.id, {type: 'GET_SCHEDULER_PROGRESS'}, (response) => {
-                            resolve(chrome.runtime.lastError ? [] : (response || []));
+                    const aProgress = await new Promise((pResolve) => {
+                        chrome.tabs.sendMessage(oTab.id, {type: 'GET_SCHEDULER_PROGRESS'}, (pResponse) => {
+                            pResolve(chrome.runtime.lastError ? [] : (pResponse || []));
                         });
                     });
 
-                    aProgress.forEach((oItem) => {
+                    aProgress.forEach((pItem) => {
 
-                        const sTrackId = oItem.originalInternalId || oItem.internalId;
+                        const sTrackId = pItem.originalInternalId || pItem.internalId;
 
                         if (oSeen.has(sTrackId)) {
                             return;
                         }
 
                         oSeen.add(sTrackId);
-                        iProcessed++;
-                        updateApplyRow(oItem);
+                        nProcessed++;
+                        updateApplyRow(pItem);
 
-                        if (oItem.success) {
-                            iSuccess++;
+                        if (pItem.success) {
+                            nSuccess++;
                         } else {
-                            iFailed++;
-                            aApplyErrors.push(oItem);
+                            nFailed++;
+                            aApplyErrors.push(pItem);
                         }
 
-                        updateApplyStatus(iProcessed, iTotal, iSuccess, iFailed);
+                        updateApplyStatus(nProcessed, nTotal, nSuccess, nFailed);
                     });
 
-                } catch (e) {
+                } catch (pErr) {
                     /* Retry */
                 }
 
-                if (iProcessed >= iTotal) {
+                if (nProcessed >= nTotal) {
                     break;
                 }
             }
 
-            if (iProcessed < iTotal) {
-                oSchedulerStatus.textContent = 'Timed out. ' + iProcessed + ' / ' + iTotal + ' processed.';
+            if (nProcessed < nTotal) {
+                oSchedulerStatus.textContent = 'Timed out. ' + nProcessed + ' / ' + nTotal + ' processed.';
                 oSchedulerStatus.className = 'sm-scheduler-status error';
             }
 
@@ -2096,8 +2084,8 @@ const runPopupLogic = async () => {
                 oSchedulerLogBtn.style.display = '';
             }
 
-        } catch (e) {
-            oSchedulerStatus.textContent = 'Error: ' + e.message;
+        } catch (pErr) {
+            oSchedulerStatus.textContent = 'Error: ' + pErr.message;
             oSchedulerStatus.className = 'sm-scheduler-status error';
         }
 
@@ -2116,9 +2104,7 @@ const runPopupLogic = async () => {
         aApplyErrors = [];
         oSchedulerLogBtn.style.display = 'none';
 
-        await new Promise((resolve) => {
-            chrome.storage.local.remove(['scheduledDeployments', 'scheduledCollectedAt', 'scheduledCollectedFrom', 'scheduledAccountId'], resolve);
-        });
+        await chrome.storage.local.remove(['scheduledDeployments', 'scheduledCollectedAt', 'scheduledCollectedFrom', 'scheduledAccountId']).catch(() => {});
 
         await renderSchedulerStoredData();
     });
@@ -2137,7 +2123,7 @@ const runPopupLogic = async () => {
 
     try {
         bHasRecordId = new URL(oTab.url).searchParams.has('id');
-    } catch (e) {
+    } catch (pErr) {
         /* invalid URL, treat as no record */
     }
 
@@ -2161,13 +2147,13 @@ const runPopupLogic = async () => {
         }
 
         const sUrl = `${sOrigin}/app/common/scripting/scriptedrecord.nl?id=${oLastData.RECORD_TYPE.toUpperCase()}`;
-        chrome.tabs.create({url: sUrl});
+        chrome.tabs.create({url: sUrl}).catch(() => {});
     });
 
-    document.querySelectorAll('.sm-footer a[target="_blank"]').forEach((oLink) => {
-        oLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            chrome.tabs.create({url: e.currentTarget.href});
+    document.querySelectorAll('.sm-footer a[target="_blank"]').forEach((pLink) => {
+        pLink.addEventListener('click', (pEvent) => {
+            pEvent.preventDefault();
+            chrome.tabs.create({url: pEvent.currentTarget.href}).catch(() => {});
         });
     });
 
@@ -2186,18 +2172,18 @@ const runPopupLogic = async () => {
 
         for (let i = 0; i < pMaxRetries; i++) {
 
-            await new Promise((resolve) => setTimeout(resolve, pIntervalMs));
+            await new Promise((pResolve) => setTimeout(pResolve, pIntervalMs));
 
             try {
 
-                const oResponse = await new Promise((resolve) => {
+                const oResponse = await new Promise((pResolve) => {
 
-                    chrome.tabs.sendMessage(pTabId, {type: 'GET_SCRIPTS_DATA'}, (response) => {
+                    chrome.tabs.sendMessage(pTabId, {type: 'GET_SCRIPTS_DATA'}, (pResponse) => {
 
                         if (chrome.runtime.lastError) {
-                            resolve(null);
+                            pResolve(null);
                         } else {
-                            resolve(response);
+                            pResolve(pResponse);
                         }
                     });
                 });
@@ -2230,20 +2216,20 @@ const runPopupLogic = async () => {
                                     applyStackOrder(oLastData.SCRIPTS_DATA, oStackMap);
                                     bStackOrderAvailable = true;
                                 }
-                            } catch (e) {
+                            } catch (pErr) {
                                 /* Stack order is non-critical -- continue without it */
                             }
                         }
 
                         const {SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR} = oLastData;
 
-                        oCardsContainer.innerHTML = '';
+                        oCardsContainer.replaceChildren();
                         renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
                         return;
                     }
                 }
 
-            } catch (e) {
+            } catch (pErr) {
                 /* Retry */
             }
         }
@@ -2275,8 +2261,8 @@ const runPopupLogic = async () => {
             /* Poll for data */
             await pollForData(oTab.id, 8, 400);
 
-        } catch (e) {
-            showMessage('Error: ' + e.message, true);
+        } catch (pErr) {
+            showMessage('Error: ' + pErr.message, true);
         }
     };
 
