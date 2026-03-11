@@ -66,8 +66,6 @@ Open any record, click the icon, and get a clean, organized breakdown of everyth
 
 - 🔄 **Refresh** · Force a fresh data fetch at any time.
 
-- 💡 **Smart Icon** · The extension icon is only active on NetSuite pages. It grays out automatically on non-NetSuite sites.
-
 ### Scheduled Deployments Sync
 
 - 🕐 **Collect** · Gather all Scheduled and Map/Reduce deployments with status "Scheduled" from your production environment.
