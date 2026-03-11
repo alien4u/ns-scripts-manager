@@ -22,7 +22,7 @@
 | Edge Add-ons | v1.0.0 | *Coming soon* |
 | Firefox Add-ons | v1.0.0 | *Coming soon* |
 
-> v1.0.1 has been submitted to all stores and is pending review.
+> v1.0.2 has been submitted to all stores and is pending review.
 
 ## Overview
 
@@ -194,7 +194,6 @@ All data is retrieved live from the page context via NetSuite's native APIs. No 
 
 | Permission | Purpose |
 |------------|---------|
-| `host_permissions: *.netsuite.com` | Inject scripts and interact with NetSuite pages |
 | `activeTab` | Interact with the current record page when activated |
 | `storage` | Persist preferences (theme, filter, sort, group order, scheduler data) |
 | `scripting` | Inject data-fetching scripts into NetSuite on demand |

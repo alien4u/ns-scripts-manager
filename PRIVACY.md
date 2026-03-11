@@ -35,7 +35,6 @@ This extension does **not**:
 
 | Permission | Purpose |
 |------------|---------|
-| `host_permissions: *.netsuite.com` | Inject scripts and interact with NetSuite pages |
 | `activeTab` | Interact with the current record page when activated |
 | `storage` | Persist user preferences (theme, filter, sort, group order) |
 | `scripting` | Inject data-fetching script into NetSuite on demand |
