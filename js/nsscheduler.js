@@ -536,16 +536,16 @@
                 }
 
                 const aResults = [];
-                let iIndex = 0;
+                let nIndex = 0;
 
                 function processNext() {
 
-                    if (iIndex >= pDeployments.length) {
+                    if (nIndex >= pDeployments.length) {
                         postResult('SCHEDULER_APPLY_RESULT', aResults, null);
                         return;
                     }
 
-                    const oDep = pDeployments[iIndex];
+                    const oDep = pDeployments[nIndex];
                     let oItemResult;
 
                     try {
@@ -614,7 +614,7 @@
 
                     aResults.push(oItemResult);
                     postResult('SCHEDULER_APPLY_PROGRESS', oItemResult, null);
-                    iIndex++;
+                    nIndex++;
                     setTimeout(processNext, 0);
                 }
 
@@ -683,16 +683,16 @@
         }
 
         const aResults = [];
-        let iIndex = 0;
+        let nIndex = 0;
 
         function processNext() {
 
-            if (iIndex >= pDeployments.length) {
+            if (nIndex >= pDeployments.length) {
                 postResult('SCHEDULER_APPLY_RESULT', aResults, null);
                 return;
             }
 
-            const oDep = pDeployments[iIndex];
+            const oDep = pDeployments[nIndex];
             let oItemResult;
 
             try {
@@ -753,7 +753,7 @@
 
             aResults.push(oItemResult);
             postResult('SCHEDULER_APPLY_PROGRESS', oItemResult, null);
-            iIndex++;
+            nIndex++;
             setTimeout(processNext, 0);
         }
 

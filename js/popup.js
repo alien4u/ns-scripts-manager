@@ -21,6 +21,11 @@ const runPopupLogic = async () => {
         window.chrome = browser;
     }
 
+    const oFooterVersion = document.getElementById('footerVersion');
+    if (oFooterVersion) {
+        oFooterVersion.textContent = 'NetSuite Scripts Manager v' + chrome.runtime.getManifest().version;
+    }
+
     /* ────────────────────────────────────────────────
      * DOM References
      * ──────────────────────────────────────────────── */
@@ -210,6 +215,12 @@ const runPopupLogic = async () => {
 
     const oRoot = document.documentElement;
 
+    /**
+     * Sets the popup dimensions on both html and body elements.
+     *
+     * @param {number} pWidth
+     * @param {number} pHeight
+     */
     const setPopupSize = (pWidth, pHeight) => {
         const sW = pWidth + 'px';
         const sH = pHeight + 'px';
@@ -221,9 +232,12 @@ const runPopupLogic = async () => {
         document.body.style.maxWidth = sW;
     };
 
-    if (oStoredSettings.sm_popupWidth && oStoredSettings.sm_popupHeight) {
-        setPopupSize(oStoredSettings.sm_popupWidth, oStoredSettings.sm_popupHeight);
-    }
+    const nDefaultWidth = 420;
+    const nDefaultHeight = 500;
+    setPopupSize(
+        oStoredSettings.sm_popupWidth || nDefaultWidth,
+        oStoredSettings.sm_popupHeight || nDefaultHeight
+    );
 
     const oResizeHandle = document.getElementById('resizeHandle');
     if (oResizeHandle) {
@@ -1337,14 +1351,14 @@ const runPopupLogic = async () => {
     /**
      * Renders the selected deployments with per-line spinners before apply starts.
      *
-     * @param {Array} aSelected
+     * @param {Array} pSelected
      */
-    const renderApplyPending = (aSelected) => {
+    const renderApplyPending = (pSelected) => {
 
         oSchedulerList.replaceChildren();
         oSchedulerListHeader.style.display = 'none';
 
-        aSelected.forEach((pDep) => {
+        pSelected.forEach((pDep) => {
 
             const oItem = document.createElement('div');
             oItem.className = 'sm-sched-item';
@@ -1800,6 +1814,11 @@ const runPopupLogic = async () => {
 
     const oFooterEl = document.querySelector('.sm-footer');
 
+    /**
+     * Toggles visibility of main content siblings when scheduler views are active.
+     *
+     * @param {boolean} bShow - true to hide cards/footer/spinner, false to restore
+     */
     const setSchedulerView = (bShow) => {
         const sCards = bShow ? 'none' : '';
         oCardsContainer.style.display = sCards;

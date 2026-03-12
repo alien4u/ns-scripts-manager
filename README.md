@@ -10,7 +10,7 @@
 
 **Instantly view all deployed scripts and workflows on any NetSuite record. Sort by execution order, filter, and jump to source code in one click.**
 
-![Version](https://img.shields.io/badge/version-1.0.4-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![License](https://img.shields.io/badge/license-FSL--1.1--MIT-green)
 ![Manifest](https://img.shields.io/badge/manifest-v3-orange)
 
@@ -22,7 +22,7 @@
 | Edge Add-ons | v1.0.0 | *Pending review* |
 | Firefox Add-ons | v1.0.2 | [Install](https://addons.mozilla.org/en-US/firefox/addon/netsuite-scripts-manager/) |
 
-> v1.0.4 has been submitted to all stores and is pending review.
+> v1.0.5 has been submitted to all stores and is pending review.
 
 ## Overview
 
@@ -209,6 +209,14 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Sponsored by **[SuiteMigration](https://suitemigration.com/netsuite-extension-alien/?utm_source=alien_technology&utm_medium=banner&utm_campaign=alien_extensions&utm_content=ns-scripts-manager)**
 
 ## Changelog
+
+### v1.0.5 - 2026-03-12
+
+- Always set explicit popup dimensions on load (defaults 420x500) so flex layout is bounded from the start
+- Fixes scrolling not activating until the resize handle was touched
+- Footer version now reads dynamically from manifest via `chrome.runtime.getManifest().version`
+- Hungarian notation fixes: `iIndex` to `nIndex`, `aSelected` param to `pSelected`
+- Added JSDoc to `buildAndRun`, `setPopupSize`, `setSchedulerView`
 
 ### v1.0.4 - 2026-03-12
 

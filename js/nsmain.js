@@ -97,6 +97,11 @@
             FILE_HIDE_IN_BUNDLE: {LEVEL: oScriptFileJoin, COLUMN: {fieldId: 'hideinbundle'}},
         };
 
+        /**
+         * Builds query columns from oColumnsMap, sets sort order, and executes the query.
+         *
+         * @returns {Array} Query result rows
+         */
         const buildAndRun = () => {
 
             oQueryObj.columns = [...Object.keys(oColumnsMap).map((pColumn) => {
