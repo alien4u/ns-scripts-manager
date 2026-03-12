@@ -208,6 +208,33 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Code co-authored with **Claude Code**
 - Sponsored by **[SuiteMigration](https://suitemigration.com/netsuite-extension-alien/?utm_source=alien_technology&utm_medium=banner&utm_campaign=alien_extensions&utm_content=ns-scripts-manager)**
 
+## Changelog
+
+### v1.0.3 - 2026-03-12
+
+- Fixed scheduler safety warning overflowing the popup without scrolling
+- Version bump across manifests, popup footer, and README
+
+### v1.0.2 - 2026-03-10
+
+- Removed smart icon (gray out) -- extension icon is always clickable; non-NetSuite pages show a friendly message
+- Dropped `host_permissions` and `declarativeContent` from both manifests -- eliminates install-time browser warnings
+- Minimal permissions: `activeTab`, `storage`, `scripting` only
+- Stripped icon state management from background service worker
+- Fixed Firefox manifest (`background.scripts` only, no `service_worker`)
+
+### v1.0.1 - 2026-03-08
+
+- Removed `host_permissions` for Chrome, fixed cross-browser console warnings
+- All `tabs.sendMessage` callbacks check `runtime.lastError`
+- All `chrome.storage.local` calls use native MV3 Promise API with `.catch(() => {})`
+- Eliminated all `innerHTML` usage -- `replaceChildren()` and `createElement`/`textContent` throughout
+- Hungarian notation cleanup across all JS files
+
+### v1.0.0
+
+- Initial public release
+
 ## License
 
 [FSL-1.1-MIT](LICENSE) -- Free to use for any non-competing purpose. Converts to MIT automatically after two years.
