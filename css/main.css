@@ -904,10 +904,10 @@ body.sm-compact .sm-count-warn {
  * Scheduler Panel
  * =============================================== */
 .sm-scheduler {
-    flex-shrink: 0;
+    flex: 1;
     border-bottom: 1px solid var(--sm-border);
     background: var(--sm-bg);
-    overflow: hidden;
+    overflow-y: auto;
 }
 
 .sm-scheduler-header {
@@ -1071,8 +1071,7 @@ body.theme-dark .sm-scheduler-status.success {
 }
 
 .sm-scheduler-list {
-    max-height: 250px;
-    overflow-y: auto;
+    overflow-y: visible;
 }
 
 .sm-sched-item {
@@ -1253,7 +1252,6 @@ body.theme-dark .sm-sched-item-badge.blocked {
     font-size: 13px;
     line-height: 1.55;
     overflow-y: auto;
-    min-height: 0;
 }
 
 .sm-warning-header {

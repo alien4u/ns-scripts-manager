@@ -1798,6 +1798,15 @@ const runPopupLogic = async () => {
         oSchedulerWarning.appendChild(oFooter);
     };
 
+    const oFooterEl = document.querySelector('.sm-footer');
+
+    const setSchedulerView = (bShow) => {
+        const sCards = bShow ? 'none' : '';
+        oCardsContainer.style.display = sCards;
+        oFooterEl.style.display = sCards;
+        oSpinner.style.display = sCards;
+    };
+
     oSchedulerBtn?.addEventListener('click', async () => {
 
         const bWarningVisible = oSchedulerWarning.style.display === 'block';
@@ -1807,6 +1816,7 @@ const runPopupLogic = async () => {
             oSchedulerWarning.style.display = 'none';
             oSchedulerPanel.style.display = 'none';
             oSchedulerBtn.classList.remove('active');
+            setSchedulerView(false);
             if (oMessage.textContent) {
                 oMessage.classList.add('visible');
             }
@@ -1815,6 +1825,7 @@ const runPopupLogic = async () => {
 
         oMessage.classList.remove('visible');
         oSchedulerBtn.classList.add('active');
+        setSchedulerView(true);
 
         const oStored = await chrome.storage.local.get(['scheduledDeployments']).catch(() => ({}));
 
