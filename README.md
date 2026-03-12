@@ -10,7 +10,7 @@
 
 **Instantly view all deployed scripts and workflows on any NetSuite record. Sort by execution order, filter, and jump to source code in one click.**
 
-![Version](https://img.shields.io/badge/version-1.0.3-blue)
+![Version](https://img.shields.io/badge/version-1.0.4-blue)
 ![License](https://img.shields.io/badge/license-FSL--1.1--MIT-green)
 ![Manifest](https://img.shields.io/badge/manifest-v3-orange)
 
@@ -22,7 +22,7 @@
 | Edge Add-ons | v1.0.0 | *Pending review* |
 | Firefox Add-ons | v1.0.2 | [Install](https://addons.mozilla.org/en-US/firefox/addon/netsuite-scripts-manager/) |
 
-> v1.0.3 has been submitted to all stores and is pending review.
+> v1.0.4 has been submitted to all stores and is pending review.
 
 ## Overview
 
@@ -209,6 +209,12 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Sponsored by **[SuiteMigration](https://suitemigration.com/netsuite-extension-alien/?utm_source=alien_technology&utm_medium=banner&utm_campaign=alien_extensions&utm_content=ns-scripts-manager)**
 
 ## Changelog
+
+### v1.0.4 - 2026-03-12
+
+- Fixed scheduler warning and deployment list overflow for cross-browser compatibility (Chrome and Firefox)
+- Scheduler views now properly hide main content siblings so panels get full popup space
+- Removed fixed max-height on scheduler list, parent container handles scrolling
 
 ### v1.0.3 - 2026-03-12
 
