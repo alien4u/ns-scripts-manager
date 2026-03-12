@@ -217,8 +217,8 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 
 ### v1.0.2 - 2026-03-10
 
-- Removed smart icon (gray out) -- extension icon is always clickable; non-NetSuite pages show a friendly message
-- Dropped `host_permissions` and `declarativeContent` from both manifests -- eliminates install-time browser warnings
+- Removed smart icon (gray out). Extension icon is always clickable; non-NetSuite pages show a friendly message
+- Dropped `host_permissions` and `declarativeContent` from both manifests. Eliminates install-time browser warnings
 - Minimal permissions: `activeTab`, `storage`, `scripting` only
 - Stripped icon state management from background service worker
 - Fixed Firefox manifest (`background.scripts` only, no `service_worker`)
@@ -228,7 +228,7 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Removed `host_permissions` for Chrome, fixed cross-browser console warnings
 - All `tabs.sendMessage` callbacks check `runtime.lastError`
 - All `chrome.storage.local` calls use native MV3 Promise API with `.catch(() => {})`
-- Eliminated all `innerHTML` usage -- `replaceChildren()` and `createElement`/`textContent` throughout
+- Eliminated all `innerHTML` usage. Uses `replaceChildren()` and `createElement`/`textContent` throughout
 - Hungarian notation cleanup across all JS files
 
 ### v1.0.0
@@ -237,7 +237,7 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 
 ## License
 
-[FSL-1.1-MIT](LICENSE) -- Free to use for any non-competing purpose. Converts to MIT automatically after two years.
+[FSL-1.1-MIT](LICENSE). Free to use for any non-competing purpose. Converts to MIT automatically after two years.
 
 ---
 
