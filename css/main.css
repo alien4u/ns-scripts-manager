@@ -1247,12 +1247,13 @@ body.theme-dark .sm-sched-item-badge.blocked {
 /* ── Scheduler Warning Gate ── */
 
 .sm-warning {
-    flex-shrink: 0;
+    flex: 1;
     background: var(--sm-bg);
     color: var(--sm-text);
     font-size: 13px;
     line-height: 1.55;
-    overflow: hidden;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .sm-warning-header {
