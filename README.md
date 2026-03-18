@@ -18,11 +18,9 @@
 
 | Store | Version | Link |
 |-------|---------|------|
-| Chrome Web Store | v1.0.2 | [Install](https://chromewebstore.google.com/detail/netsuite-scripts-manager/cnedjecifkobibjlopnpofochhhefihl) |
-| Edge Add-ons | v1.0.0 | *Pending review* |
-| Firefox Add-ons | v1.0.2 | [Install](https://addons.mozilla.org/en-US/firefox/addon/netsuite-scripts-manager/) |
-
-> v1.0.5 has been submitted to all stores and is pending review.
+| Chrome Web Store | v1.0.5 | [Install](https://chromewebstore.google.com/detail/netsuite-scripts-manager/cnedjecifkobibjlopnpofochhhefihl) |
+| Edge Add-ons | v1.0.5 | [Install](https://microsoftedge.microsoft.com/addons/detail/netsuite-scripts-manager/agcnfafjphndnhpmlhpkieaajdejcicf) |
+| Firefox Add-ons | v1.0.5 | [Install](https://addons.mozilla.org/en-US/firefox/addon/netsuite-scripts-manager/) |
 
 ## Overview
 
