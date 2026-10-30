@@ -23,7 +23,6 @@ browserAPI.runtime.onMessage.addListener((pMessage, pSender, pFnSendResponse) =>
     if (pMessage.type === 'INJECT_AND_GET_DATA') {
 
         const nTabId = pMessage.tabId;
-        const bForceRefresh = !!pMessage.forceRefresh;
 
         if (!nTabId) {
             pFnSendResponse({error: 'No tab ID provided.'});
@@ -35,16 +34,15 @@ browserAPI.runtime.onMessage.addListener((pMessage, pSender, pFnSendResponse) =>
             files: ['js/content.js']
         }).then(() => {
 
-            if (bForceRefresh) {
-
-                browserAPI.tabs.sendMessage(nTabId, {type: 'FORCE_REFRESH'}, () => {
-                    const _ignored = browserAPI.runtime.lastError;
-                    pFnSendResponse({success: true});
-                });
-            } else {
-
+            /* Every popup request runs nsmain.js fresh; cache keys let it skip the searches */
+            browserAPI.tabs.sendMessage(nTabId, {
+                type: 'RUN_NSMAIN',
+                requestId: pMessage.requestId || '',
+                cacheKeys: Array.isArray(pMessage.cacheKeys) ? pMessage.cacheKeys : []
+            }, () => {
+                const _ignored = browserAPI.runtime.lastError;
                 pFnSendResponse({success: true});
-            }
+            });
 
         }).catch((oError) => {
 

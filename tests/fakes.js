@@ -21,7 +21,7 @@ const oSources = {
  * Timers are inert: the 2.x fakes call back synchronously, so the failsafe never matters.
  *
  * @param {string} pName - 'nsmain' | 'nsscheduler'
- * @param {Object} pGlobals - Extra globals (require, nlapi*, document)
+ * @param {Object} pGlobals - Extra globals (require, nlapi*, document); document defaults to an empty page
  * @returns {Array<{message: Object, targetOrigin: string}>} Messages posted to window
  */
 export const runPageScript = (pName, pGlobals) => {
@@ -38,6 +38,7 @@ export const runPageScript = (pName, pGlobals) => {
 
     const oContext = vm.createContext({
         window: oWindow,
+        document: {getElementById: () => null},
         setTimeout: () => 0,
         clearTimeout: () => {},
         ...pGlobals

@@ -195,7 +195,7 @@ All data is retrieved live from the page context via NetSuite's native APIs. No 
 | Permission | Purpose |
 |------------|---------|
 | `activeTab` | Interact with the current record page when activated |
-| `storage` | Persist preferences (theme, filter, sort, group order, scheduler data) |
+| `storage` | Persist preferences (theme, filter, sort, group order, scheduler data); 2-minute in-memory record-type cache (`storage.session`) |
 | `scripting` | Inject data-fetching scripts into NetSuite on demand |
 
 ## Browser Compatibility
@@ -222,6 +222,7 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Scheduler Check now reports undeployed and inactive-script deployments on the SuiteScript 2.x path
 - Client and User Event count warnings count only running deployments (active or testing); the Client limit warning honors the new "Remove Client Script Deployment Limit per Record" preference (NetSuite 2026.2+)
 - No more Content Security Policy errors on the extension Errors page when reading NetSuite pages (stack order and form scripts)
+- Record-type cache: reopening the popup on a record of the same type (same account and role) within 2 minutes skips the searches and the Scripted Record page fetches; kept in memory only (`chrome.storage.session`); Refresh always fetches fresh
 - Removed the Custom GL Lines (Plug-in) group, which could never populate
 - New default group order: Client, Form Scripts, User Event, Workflows, Workflow Action, Mass Update (saved orders are kept)
 - The group order settings and the Scheduled Deployments Sync panel no longer open at the same time

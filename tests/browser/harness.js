@@ -4,7 +4,7 @@
  *
  * Query params:
  *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter | slow-forms
- *             | count-warnings
+ *             | count-warnings | cache | no-session
  *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
  *
  * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
@@ -18,7 +18,7 @@
 
     const SCENARIOS = [
         'record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter', 'slow-forms',
-        'count-warnings'
+        'count-warnings', 'cache', 'no-session'
     ];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
@@ -28,6 +28,7 @@
     ];
     const RUN_STATES = ['active', 'testing', 'current_form', 'unknown_form'];
     const MIN_CONTRAST = 4.5;
+    const CACHE_TTL_MS = 2 * 60 * 1000;
 
     const oParams = new URLSearchParams(window.location.search);
     const sScenario = oParams.get('scenario') || 'record';
@@ -39,14 +40,25 @@
     const fnNativeFetch = window.fetch.bind(window);
     const aPageErrors = [];
     const aCspViolations = [];
-    const oLog = {fetches: [], aborted: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: []};
+    const oLog = {
+        fetches: [], aborted: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: [],
+        injects: [], replies: [], staleServed: 0
+    };
     const oStore = {};
+    const oSession = {};
+    const oClock = {now: Date.parse('2026-10-30T12:00:00Z')};
     const oState = {
         response: null,
+        reply: null,
         tabUrl: '',
+        popupHtml: '',
+        formsHtmlByType: {},
         stallForms: false,
         deferSchedulerGet: false,
-        releaseSchedulerGet: null
+        releaseSchedulerGet: null,
+        staleReplies: [],
+        forceLightOnce: false,
+        advanceClockOnReply: 0
     };
 
     window.addEventListener('error', (pEvent) => {
@@ -303,6 +315,26 @@
     };
 
     /**
+     * Serializes everything the cards area shows (headers, badges, tooltips, links, hooks) so two
+     * renders can be compared.
+     *
+     * @returns {string}
+     */
+    const snapshotView = () => {
+
+        return JSON.stringify(getSections().map((pSection) => ({
+            header: pSection.header.textContent,
+            cards: [...pSection.body.querySelectorAll('.script-card')].map((pCard) => ({
+                name: pCard.querySelector('.card-name').textContent.trim(),
+                meta: pCard.querySelector('.card-meta').textContent,
+                badge: readBadge(pCard),
+                links: [...pCard.querySelectorAll('a[href]')].map((pLink) => pLink.href),
+                hooks: [...pCard.querySelectorAll('.sm-hook-tag')].map((pTag) => pTag.textContent)
+            }))
+        })));
+    };
+
+    /**
      * Reads badge, tooltip, dimming and dot of a card.
      *
      * @param {HTMLElement} pCard
@@ -395,11 +427,83 @@
      * ──────────────────────────────────────────────── */
 
     /**
+     * Reply the fake content script / nsmain pair gives to one popup request: light payload when
+     * the request carries a fresh key for this role and record type (the nsmain.js rule, unit
+     * tested there), full payload otherwise. oState.forceLightOnce simulates a key mismatch.
+     *
+     * @param {string} pRequestId
+     * @param {string[]} pCacheKeys
+     * @returns {Object}
+     */
+    const buildReply = (pRequestId, pCacheKeys) => {
+
+        if (oState.response.error) {
+            return {...structuredClone(oState.response), requestId: pRequestId};
+        }
+
+        const oData = oState.response.data;
+        const sKey = `${oData.ROLE_ID || ''}|${String(oData.RECORD_TYPE).toUpperCase()}`;
+        const bLight = oState.forceLightOnce || (!!oData.ROLE_ID && pCacheKeys.includes(sKey));
+
+        oState.forceLightOnce = false;
+        oLog.replies.push(bLight ? 'light' : 'full');
+
+        return {
+            type: 'SCRIPTS_DATA',
+            requestId: pRequestId,
+            error: null,
+            data: bLight
+                ? {
+                    FROM_CACHE: true,
+                    RECORD_TYPE: oData.RECORD_TYPE,
+                    ROLE_ID: oData.ROLE_ID,
+                    CUSTOM_FORM_ID: oData.CUSTOM_FORM_ID,
+                    CLIENT_LIMIT_REMOVED: oData.CLIENT_LIMIT_REMOVED,
+                    API_VERSION: oData.API_VERSION
+                }
+                : structuredClone(oData)
+        };
+    };
+
+    /**
+     * Promise-based fake of a chrome.storage area backed by a plain object.
+     *
+     * @param {Object} pBacking
+     * @param {Array} [pSetLog]
+     * @returns {Object}
+     */
+    const createStorageArea = (pBacking, pSetLog) => {
+
+        return {
+            get: async (pKeys) => {
+
+                const aKeys = pKeys == null ? Object.keys(pBacking) : [].concat(pKeys);
+                return Object.fromEntries(
+                    aKeys.filter((pKey) => pKey in pBacking).map((pKey) => [pKey, structuredClone(pBacking[pKey])])
+                );
+            },
+            set: async (pItems) => {
+
+                pSetLog?.push(structuredClone(pItems));
+                Object.assign(pBacking, structuredClone(pItems));
+            },
+            remove: async (pKeys) => {
+
+                [].concat(pKeys).forEach((pKey) => {
+
+                    delete pBacking[pKey];
+                });
+            }
+        };
+    };
+
+    /**
      * Installs the fake extension API used by popup.js.
      *
      * @param {Object} pManifest
+     * @param {boolean} pWithSession - false: no chrome.storage.session (older browsers)
      */
-    const installChrome = (pManifest) => {
+    const installChrome = (pManifest, pWithSession) => {
 
         const oFakeChrome = {
             runtime: {
@@ -408,6 +512,12 @@
                 sendMessage: async (pMessage) => {
 
                     oLog.runtimeMessages.push(pMessage.type);
+
+                    if (pMessage.type === 'INJECT_AND_GET_DATA') {
+                        oLog.injects.push({requestId: pMessage.requestId, cacheKeys: [...(pMessage.cacheKeys || [])]});
+                        oState.reply = buildReply(pMessage.requestId, pMessage.cacheKeys || []);
+                    }
+
                     return {success: true};
                 }
             },
@@ -442,13 +552,28 @@
                             delete oStore[pKey];
                         });
                     }
-                }
+                },
+                ...(pWithSession ? {session: createStorageArea(oSession)} : {})
             },
             tabs: {
                 query: async () => [{id: 1, url: oState.tabUrl}],
                 sendMessage: (pTabId, pMessage, pCallback) => {
 
-                    const oReply = pMessage.type === 'GET_SCRIPTS_DATA' ? structuredClone(oState.response) : null;
+                    let oReply = null;
+
+                    if (pMessage.type === 'GET_SCRIPTS_DATA') {
+
+                        if (oState.staleReplies.length > 0) {
+                            oReply = oState.staleReplies.shift();
+                            oLog.staleServed++;
+                        } else {
+                            oReply = structuredClone(oState.reply);
+                        }
+
+                        /* Entry expires between sending the keys and receiving the reply */
+                        oClock.now += oState.advanceClockOnReply;
+                        oState.advanceClockOnReply = 0;
+                    }
 
                     setTimeout(() => {
 
@@ -522,7 +647,10 @@
             await delay(40);
             nInFlight--;
 
-            return new Response(bForms ? pFormsHtml : pStackHtml, {
+            const sTypeId = new URL(sUrl).searchParams.get('id');
+            const sFormsHtml = oState.formsHtmlByType[sTypeId] || pFormsHtml;
+
+            return new Response(bForms ? sFormsHtml : pStackHtml, {
                 status: 200,
                 headers: {'Content-Type': 'text/html'}
             });
@@ -563,6 +691,26 @@
         await delay(100);
     };
 
+    /**
+     * Simulates closing and reopening the popup: fresh popup.html body, popup.js runs again
+     * (its DOMContentLoaded listener), same fake chrome storage. Returns log offsets taken
+     * before the reopen.
+     *
+     * @returns {Promise<{fetches: number, injects: number, replies: number}>}
+     */
+    const reopenPopup = async () => {
+
+        const oMarks = {fetches: oLog.fetches.length, injects: oLog.injects.length, replies: oLog.replies.length};
+
+        document.body.replaceChildren();
+        mountPopup(oState.popupHtml);
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        await waitFor(isRendered, 10000, 'popup reopen render');
+        await delay(100);
+
+        return oMarks;
+    };
+
     /* ────────────────────────────────────────────────
      * Shared checks
      * ──────────────────────────────────────────────── */
@@ -575,10 +723,11 @@
      * @param {Object} pPayload - Payload the popup received
      * @param {boolean} pDeployedOnly
      * @param {Array} [pFormScripts] - Expected form scripts, defaults to the fixture's
+     * @param {string} [pPhase] - Label suffix for multi-phase scenarios
      */
-    const checkItems = (pFixture, pPayload, pDeployedOnly, pFormScripts = pFixture.expect.formScripts) => {
+    const checkItems = (pFixture, pPayload, pDeployedOnly, pFormScripts = pFixture.expect.formScripts, pPhase = '') => {
 
-        const sSuffix = pDeployedOnly ? ' [Deployed filter]' : '';
+        const sSuffix = (pDeployedOnly ? ' [Deployed filter]' : '') + (pPhase ? ` [${pPhase}]` : '');
 
         /**
          * True when the item should be rendered.
@@ -1337,6 +1486,259 @@
         }
     };
 
+    /* ── cache / no-session: record-type cache (PLAN section 14) ── */
+
+    /**
+     * Sorted kinds ('forms' / 'stack') of the scriptedrecord.nl fetches made since a log mark.
+     *
+     * @param {number} pMark
+     * @returns {string[]}
+     */
+    const fetchKindsSince = (pMark) => oLog.fetches.slice(pMark).map((pFetch) => pFetch.kind).sort();
+
+    /**
+     * cache: miss, hit, per-record form state on hits, stale reply, null-part fill, expiry,
+     * Refresh, forced re-requests, error payloads and a record type without form scripts.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload
+     */
+    const runCacheChecks = async (pFixture, pPayload) => {
+
+        const sTypeKey = `${pPayload.ROLE_ID}|${pPayload.RECORD_TYPE.toUpperCase()}`;
+        const sCacheKey = `${pFixture.origin}|${sTypeKey}`;
+
+        /* Phases change the served payload; keep pPayload as the untouched reference */
+        oState.response.data = structuredClone(pPayload);
+        const nFormRows = pFixture.expect.formScripts.length;
+        const nT0 = oClock.now;
+
+        /**
+         * Current Refresh button tooltip.
+         *
+         * @returns {string}
+         */
+        const getRefreshTitle = () => document.getElementById('refreshBtn').title;
+
+        /**
+         * Asserts the request kinds of one open: cache keys sent and reply kind per request.
+         *
+         * @param {string} pLabel
+         * @param {Object} pMarks - reopenPopup() log offsets
+         * @param {Array<{keyed: boolean, reply: string}>} pExpected
+         */
+        const checkRequests = (pLabel, pMarks, pExpected) => {
+
+            const aActual = oLog.injects.slice(pMarks.injects).map((pInject, pIndex) => ({
+                keyed: pInject.cacheKeys.includes(sTypeKey),
+                reply: oLog.replies[pMarks.replies + pIndex]
+            }));
+            checkEqual(pLabel, aActual, pExpected);
+        };
+
+        /* 1. First open: miss */
+        const oEntry = oSession[sCacheKey];
+        checkRequests('Miss: one request without cache keys, full payload', {injects: 0, replies: 0}, [
+            {keyed: false, reply: 'full'}
+        ]);
+        checkEqual('Miss: both scriptedrecord.nl pages fetched', fetchKindsSince(0), ['forms', 'stack']);
+        check(
+            'Miss: entry written (savedAt, deployments/workflows, stack pairs, form rows without state, no HTML)',
+            !!oEntry && oEntry.savedAt === nT0 &&
+                oEntry.payload.SCRIPTS_DATA.length === pPayload.SCRIPTS_DATA.length &&
+                oEntry.payload.WORKFLOWS_DATA.length === pPayload.WORKFLOWS_DATA.length &&
+                oEntry.payload.API_VERSION === pPayload.API_VERSION &&
+                Object.keys(oEntry.payload).length === 3 &&
+                Array.isArray(oEntry.stackOrder) && oEntry.stackOrder.length > 0 &&
+                Array.isArray(oEntry.formScripts) && oEntry.formScripts.length === nFormRows &&
+                oEntry.formScripts.every((pRow) => !('STATE' in pRow)) &&
+                oEntry.payload.SCRIPTS_DATA.every((pScript) => !('STACK_ORDER' in pScript)) &&
+                !JSON.stringify(oEntry).includes('<'),
+            JSON.stringify(oEntry || null).slice(0, 400)
+        );
+        checkEqual('Miss: Refresh tooltip', getRefreshTitle(), 'Refresh data');
+
+        const sFreshView = snapshotView();
+
+        /* 2. Reopen within the TTL: hit */
+        oClock.now += 30000;
+        let oMarks = await reopenPopup();
+        checkRequests('Hit (30 s): fresh key sent, light payload', oMarks, [{keyed: true, reply: 'light'}]);
+        checkEqual('Hit: zero scriptedrecord.nl fetches', fetchKindsSince(oMarks.fetches), []);
+        check('Hit: renders identically to the fresh render', snapshotView() === sFreshView, 'render differs');
+        checkItems(pFixture, pPayload, false, undefined, 'hit, form 11');
+        checkEqual('Hit: Refresh tooltip shows the entry age', getRefreshTitle(), 'Cached 30s ago - click to refresh');
+        checkEqual('Hit: savedAt unchanged', oSession[sCacheKey]?.savedAt, nT0);
+
+        /* 3. Hit on another record of the same type with a different form */
+        oState.response.data.CUSTOM_FORM_ID = '12';
+        oClock.now += 5000;
+        oMarks = await reopenPopup();
+        checkRequests('Hit on a record using form 12: light payload', oMarks, [{keyed: true, reply: 'light'}]);
+        checkEqual('Hit on a record using form 12: zero fetches', fetchKindsSince(oMarks.fetches), []);
+        checkItems(pFixture, {...pPayload, CUSTOM_FORM_ID: '12'}, false, undefined, 'hit, form 12');
+        oState.response.data.CUSTOM_FORM_ID = pPayload.CUSTOM_FORM_ID;
+
+        /* 4. A reply carrying an old request id is ignored */
+        oState.staleReplies = [{
+            type: 'SCRIPTS_DATA',
+            requestId: 'stale-request-id',
+            error: null,
+            data: {...structuredClone(pPayload), SCRIPTS_DATA: [], WORKFLOWS_DATA: [{
+                WORKFLOW: '699', WORKFLOW_NAME: 'Stale Reply Workflow', STATUS: 'Released', STATE: 'active',
+                URL: `${pFixture.origin}/app/common/workflow/setup/workflowmanager.nl?id=699`, EDIT_URL: ''
+            }]}
+        }];
+        oClock.now += 5000;
+        oMarks = await reopenPopup();
+        check(
+            'Stale reply (old request id) is ignored; the current reply renders',
+            oLog.staleServed === 1 && snapshotView() === sFreshView &&
+                !document.getElementById('scriptCards').textContent.includes('Stale Reply Workflow'),
+            `stale served ${oLog.staleServed}`
+        );
+
+        /* 5. Entry with a failed (null) part: only that part is fetched; savedAt is kept */
+        oSession[sCacheKey].formScripts = null;
+        oClock.now += 5000;
+        oMarks = await reopenPopup();
+        checkEqual(
+            'Hit with formScripts null: only the forms fragment is fetched',
+            fetchKindsSince(oMarks.fetches),
+            ['forms']
+        );
+        check(
+            'Filling formScripts updates the entry but keeps savedAt (no TTL extension)',
+            oSession[sCacheKey]?.savedAt === nT0 && oSession[sCacheKey]?.formScripts?.length === nFormRows,
+            JSON.stringify({savedAt: oSession[sCacheKey]?.savedAt, nT0})
+        );
+        check('Hit with formScripts null: render unchanged', snapshotView() === sFreshView, 'render differs');
+
+        oSession[sCacheKey].stackOrder = null;
+        oClock.now += 5000;
+        oMarks = await reopenPopup();
+        checkEqual(
+            'Hit with stackOrder null: only the stack page is fetched',
+            fetchKindsSince(oMarks.fetches),
+            ['stack']
+        );
+        check(
+            'Filling stackOrder keeps savedAt; stack order still applied',
+            oSession[sCacheKey]?.savedAt === nT0 && oSession[sCacheKey]?.stackOrder?.length > 0 &&
+                snapshotView() === sFreshView,
+            `savedAt=${oSession[sCacheKey]?.savedAt}`
+        );
+
+        /* 6. Expired entry: full run */
+        oClock.now = nT0 + CACHE_TTL_MS + 1000;
+        oMarks = await reopenPopup();
+        checkRequests('Expired entry: no key sent, full payload', oMarks, [{keyed: false, reply: 'full'}]);
+        checkEqual('Expired entry: both pages fetched again', fetchKindsSince(oMarks.fetches), ['forms', 'stack']);
+        checkEqual('Expired entry: rewritten with a new savedAt', oSession[sCacheKey]?.savedAt, oClock.now);
+        checkEqual('Expired entry: Refresh tooltip', getRefreshTitle(), 'Refresh data');
+
+        /* 7. Refresh bypasses a fresh entry and overwrites it */
+        oClock.now += 10000;
+        oMarks = {fetches: oLog.fetches.length, injects: oLog.injects.length, replies: oLog.replies.length};
+        document.getElementById('refreshBtn').click();
+        await waitFor(isRendered, 10000, 'refresh render');
+        await delay(100);
+        checkRequests('Refresh: no key sent although the entry is fresh, full payload', oMarks, [
+            {keyed: false, reply: 'full'}
+        ]);
+        checkEqual('Refresh: both pages fetched', fetchKindsSince(oMarks.fetches), ['forms', 'stack']);
+        checkEqual('Refresh: entry overwritten (savedAt = now)', oSession[sCacheKey]?.savedAt, oClock.now);
+
+        /* 8. Light reply without a matching entry: exactly one forced re-request */
+        delete oSession[sCacheKey];
+        oState.forceLightOnce = true;
+        oClock.now += 1000;
+        oMarks = await reopenPopup();
+        checkRequests('Light reply with a missing entry: one forced re-request', oMarks, [
+            {keyed: false, reply: 'light'},
+            {keyed: false, reply: 'full'}
+        ]);
+        check('Forced re-request renders the full result', snapshotView() === sFreshView, 'render differs');
+
+        /* 8b. Entry expires between sending the key and receiving the light reply */
+        oState.advanceClockOnReply = CACHE_TTL_MS;
+        oMarks = await reopenPopup();
+        checkRequests('Entry expired before the light reply: one forced re-request', oMarks, [
+            {keyed: true, reply: 'light'},
+            {keyed: false, reply: 'full'}
+        ]);
+        check('Re-request after expiry renders the full result', snapshotView() === sFreshView, 'render differs');
+
+        /* 9. Payload with a search error is not cached */
+        Object.keys(oSession).forEach((pKey) => {
+
+            delete oSession[pKey];
+        });
+        oState.response.data.SCRIPT_ERROR = 'Synthetic search error';
+        oMarks = await reopenPopup();
+        check(
+            'Error payload: rendered with the error row and not cached',
+            !!document.querySelector('#scriptCards .sm-error-row') && Object.keys(oSession).length === 0,
+            JSON.stringify(Object.keys(oSession))
+        );
+        oState.response.data.SCRIPT_ERROR = '';
+
+        /* 10. Record type without form scripts: [] is cached and a hit needs no fetch */
+        if (!oState.formsHtmlByType.INVOICE) {
+            check('Fixture provides formsEmptyHtml for the no-form-scripts case', false, 'missing');
+            return;
+        }
+
+        const sInvoiceKey = `${pFixture.origin}|${pPayload.ROLE_ID}|INVOICE`;
+        oState.response.data = {...structuredClone(pPayload), RECORD_TYPE: 'invoice', CUSTOM_FORM_ID: '31'};
+        oClock.now += 1000;
+        oMarks = await reopenPopup();
+        check(
+            'No form scripts (miss): formScripts cached as [] (valid empty, not null)',
+            Array.isArray(oSession[sInvoiceKey]?.formScripts) && oSession[sInvoiceKey].formScripts.length === 0,
+            JSON.stringify(oSession[sInvoiceKey]?.formScripts)
+        );
+
+        oClock.now += 5000;
+        oMarks = await reopenPopup();
+        checkEqual('No form scripts (hit): light payload', oLog.replies.slice(oMarks.replies), ['light']);
+        checkEqual('No form scripts (hit): zero scriptedrecord.nl fetches', fetchKindsSince(oMarks.fetches), []);
+        check(
+            'No form scripts (hit): scripts render, no Form Scripts group',
+            document.querySelectorAll('#scriptCards .sm-deploy-id').length === pPayload.SCRIPTS_DATA.length &&
+                !getSections().some((pSection) => pSection.title === 'Form Scripts'),
+            getSections().map((pSection) => pSection.title).join(', ')
+        );
+
+        oState.response.data = structuredClone(pPayload);
+    };
+
+    /**
+     * no-session: chrome.storage.session missing -> no cache, every open is a full run.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload
+     */
+    const runNoSessionChecks = async (pFixture, pPayload) => {
+
+        check(
+            'No storage.session: first open sends no keys and fetches both pages',
+            oLog.injects[0]?.cacheKeys.length === 0 && fetchKindsSince(0).join() === 'forms,stack',
+            JSON.stringify(oLog.injects)
+        );
+        checkItems(pFixture, pPayload, false, undefined, 'no session');
+
+        oClock.now += 5000;
+        const oMarks = await reopenPopup();
+        check(
+            'No storage.session: reopen runs fully again (no keys, full payload, both pages)',
+            oLog.injects[oMarks.injects]?.cacheKeys.length === 0 && oLog.replies[oMarks.replies] === 'full' &&
+                fetchKindsSince(oMarks.fetches).join() === 'forms,stack',
+            JSON.stringify(oLog.injects.slice(oMarks.injects))
+        );
+        checkEqual('No storage.session: Refresh tooltip', document.getElementById('refreshBtn').title, 'Refresh data');
+    };
+
     /**
      * slow-forms: the forms request never answers; the popup timeout must abort it and render
      * scripts and workflows without a Form Scripts group or an error.
@@ -1479,12 +1881,19 @@
             return oResponse.text();
         };
 
-        const [sFormsHtml, sStackHtml, sPopupHtml, sManifest] = await Promise.all([
+        const [sFormsHtml, sStackHtml, sPopupHtml, sManifest, sFormsEmptyHtml] = await Promise.all([
             fetchText(new URL(oFixture.formsHtml, oFixtureUrl)),
             fetchText(new URL(oFixture.stackHtml, oFixtureUrl)),
             fetchText('popup.html'),
-            fetchText('manifest.json')
+            fetchText('manifest.json'),
+            oFixture.formsEmptyHtml ? fetchText(new URL(oFixture.formsEmptyHtml, oFixtureUrl)) : ''
         ]);
+
+        oState.popupHtml = sPopupHtml;
+
+        if (sFormsEmptyHtml) {
+            oState.formsHtmlByType.INVOICE = sFormsEmptyHtml;
+        }
 
         const oPayload = structuredClone(oFixture.payload);
         let sTabPath = oFixture.recordPath;
@@ -1522,7 +1931,10 @@
 
         oState.tabUrl = oFixture.origin + sTabPath;
 
-        installChrome(JSON.parse(sManifest));
+        /* Test-only clock read by popup.js getNow(); set before popup.js loads */
+        window.__NS_SM_TEST_NOW__ = () => oClock.now;
+
+        installChrome(JSON.parse(sManifest), sScenario !== 'no-session');
         installFetch(sFormsHtml, sStackHtml);
         mountPopup(sPopupHtml);
         await startPopup();
@@ -1594,6 +2006,10 @@
                 runSlowFormsChecks(oFixture, oPayload);
             } else if (sScenario === 'count-warnings') {
                 await runCountWarningChecks(oFixture);
+            } else if (sScenario === 'cache') {
+                await runCacheChecks(oFixture, oPayload);
+            } else if (sScenario === 'no-session') {
+                await runNoSessionChecks(oFixture, oPayload);
             }
         }
 

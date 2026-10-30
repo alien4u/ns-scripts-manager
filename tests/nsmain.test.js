@@ -101,7 +101,7 @@ const oaWorkflowResultsV1 = aWorkflowDefs.map(([pId, pValue, pText, pInactive]) 
 /**
  * Runs nsmain.js on the SS 2.x path.
  *
- * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults, getPreference}
+ * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults, getPreference, role, document}
  * @returns {Array}
  */
 const runV2 = (pOptions) => {
@@ -112,13 +112,17 @@ const runV2 = (pOptions) => {
     );
 
     return runPageScript('nsmain', {
+        ...(pOptions.document ? {document: pOptions.document} : {}),
         require: createRequire({
             'N/query': createQueryModule(pOptions.scriptRows || []),
             'N/search': oSearch,
             'N/util': {extend: (pTarget, pSource) => Object.assign(pTarget, pSource)},
             'N/currentRecord': createCurrentRecordModule(pOptions.record),
             'N/runtime': {
-                getCurrentUser: () => ({getPreference: pOptions.getPreference || (() => undefined)})
+                getCurrentUser: () => ({
+                    role: pOptions.role,
+                    getPreference: pOptions.getPreference || (() => undefined)
+                })
             }
         })
     });
@@ -501,5 +505,181 @@ describe('nsmain.js CLIENT_LIMIT_REMOVED (REMOVECLIENTGOVERNANCELIMIT)', () => {
 
         expect(oMessage.error).toBeNull();
         expect(oMessage.data.CLIENT_LIMIT_REMOVED).toBeNull();
+    });
+});
+
+describe('nsmain.js popup cache request (request id, cache keys, ROLE_ID, light payload)', () => {
+
+    /**
+     * Page document holding the request element content.js writes; counts removals.
+     *
+     * @param {string} pRequestId
+     * @param {string} pCacheKeys - Raw data-cache-keys value
+     * @returns {{document: Object, removed: () => number}}
+     */
+    const makeRequestDocument = (pRequestId, pCacheKeys) => {
+
+        let nRemoved = 0;
+        const oElement = {
+            dataset: {requestId: pRequestId, cacheKeys: pCacheKeys},
+            remove: () => {
+
+                nRemoved++;
+            }
+        };
+
+        return {
+            document: {getElementById: (pId) => (pId === '__ns_sm_main_data__' && nRemoved === 0 ? oElement : null)},
+            removed: () => nRemoved
+        };
+    };
+
+    /**
+     * SS 2.x run counting N/query and N/search create() calls.
+     *
+     * @param {Object} pOptions - {document, role}
+     * @returns {{message: Object, queries: number, searches: number}}
+     */
+    const runCountedV2 = (pOptions) => {
+
+        let nQueries = 0;
+        let nSearches = 0;
+        const oQuery = createQueryModule(oaScriptRowsV2);
+        const oSearch = createSearchModule((pType) => (pType === 'workflow' ? oaWorkflowResultsV2 : []));
+        const fnQueryCreate = oQuery.create;
+        const fnSearchCreate = oSearch.create;
+
+        oQuery.create = (pArg) => {
+
+            nQueries++;
+            return fnQueryCreate(pArg);
+        };
+        oSearch.create = (pArg) => {
+
+            nSearches++;
+            return fnSearchCreate(pArg);
+        };
+
+        const aPosted = runPageScript('nsmain', {
+            document: pOptions.document,
+            require: createRequire({
+                'N/query': oQuery,
+                'N/search': oSearch,
+                'N/util': {extend: (pTarget, pSource) => Object.assign(pTarget, pSource)},
+                'N/currentRecord': createCurrentRecordModule(makeRecord('salesorder', 7, () => '42')),
+                'N/runtime': {getCurrentUser: () => ({role: pOptions.role, getPreference: () => false})}
+            })
+        });
+
+        return {message: onlyMessage(aPosted), queries: nQueries, searches: nSearches};
+    };
+
+    test('SS 2.x: matching role|TYPE -> light payload, no N/query or N/search calls, element removed', () => {
+
+        const oRequest = makeRequestDocument('req-1', JSON.stringify(['3|SALESORDER', '3|INVOICE']));
+        const oResult = runCountedV2({document: oRequest.document, role: 3});
+
+        expect(oRequest.removed()).toBe(1);
+        expect(oResult.message.requestId).toBe('req-1');
+        expect(oResult.message.error).toBeNull();
+        expect(oResult.message.data).toEqual({
+            FROM_CACHE: true,
+            RECORD_TYPE: 'salesorder',
+            ROLE_ID: '3',
+            CUSTOM_FORM_ID: '42',
+            CLIENT_LIMIT_REMOVED: false,
+            API_VERSION: '2.x'
+        });
+        expect(oResult.queries).toBe(0);
+        expect(oResult.searches).toBe(0);
+    });
+
+    test('SS 2.x: keys for another role or type -> full payload with ROLE_ID', () => {
+
+        const oRequest = makeRequestDocument('req-2', JSON.stringify(['1018|SALESORDER', '3|INVOICE']));
+        const oResult = runCountedV2({document: oRequest.document, role: 3});
+        const oData = oResult.message.data;
+
+        expect(oResult.message.requestId).toBe('req-2');
+        expect(oData.FROM_CACHE).toBeUndefined();
+        expect(oData.ROLE_ID).toBe('3');
+        expect(oData.SCRIPTS_DATA).toHaveLength(oaScriptRowsV2.length);
+        expect(oData.WORKFLOWS_DATA).toHaveLength(oaWorkflowResultsV2.length);
+        expect(oResult.queries).toBe(1);
+        expect(oResult.searches).toBe(1);
+    });
+
+    test('SS 2.x: force (no keys) and no request element -> full payload', () => {
+
+        const oForced = runCountedV2({document: makeRequestDocument('req-3', '[]').document, role: 3});
+        const oNoElement = runCountedV2({document: {getElementById: () => null}, role: 3});
+
+        expect(oForced.message.requestId).toBe('req-3');
+        expect(oForced.message.data.SCRIPTS_DATA).toHaveLength(oaScriptRowsV2.length);
+        expect(oNoElement.message.requestId).toBe('');
+        expect(oNoElement.message.data.SCRIPTS_DATA).toHaveLength(oaScriptRowsV2.length);
+        expect(oNoElement.message.data.ROLE_ID).toBe('3');
+    });
+
+    test('SS 2.x: unknown role never takes the light path; malformed keys -> full payload', () => {
+
+        const oNoRole = runCountedV2({document: makeRequestDocument('req-4', '["|SALESORDER"]').document});
+        const oBadKeys = runCountedV2({document: makeRequestDocument('req-5', '{not json').document, role: 3});
+
+        expect(oNoRole.message.data.ROLE_ID).toBe('');
+        expect(oNoRole.message.data.FROM_CACHE).toBeUndefined();
+        expect(oNoRole.queries).toBe(1);
+        expect(oBadKeys.message.data.FROM_CACHE).toBeUndefined();
+        expect(oBadKeys.queries).toBe(1);
+    });
+
+    test('Error payloads echo the request id', () => {
+
+        const oRequest = makeRequestDocument('req-6', '[]');
+        const oMessage = onlyMessage(runV2({record: makeRecord('', undefined), document: oRequest.document}));
+
+        expect(oMessage.error).toBe('NO_RECORD');
+        expect(oMessage.requestId).toBe('req-6');
+    });
+
+    test('SS 1.0: matching role|TYPE -> light payload, nlapiSearchRecord not called', () => {
+
+        let nSearches = 0;
+        const oRequest = makeRequestDocument('req-7', JSON.stringify(['1018|SALESORDER']));
+        const oMessage = onlyMessage(runV1({
+            document: oRequest.document,
+            nlapiGetContext: () => ({getRole: () => '1018', getPreference: () => 'F'}),
+            nlapiGetFieldValue: () => '42',
+            nlapiSearchRecord: () => {
+
+                nSearches++;
+                return null;
+            }
+        }));
+
+        expect(oRequest.removed()).toBe(1);
+        expect(oMessage.requestId).toBe('req-7');
+        expect(oMessage.data).toEqual({
+            FROM_CACHE: true,
+            RECORD_TYPE: 'salesorder',
+            ROLE_ID: '1018',
+            CUSTOM_FORM_ID: '42',
+            CLIENT_LIMIT_REMOVED: false,
+            API_VERSION: '1.0'
+        });
+        expect(nSearches).toBe(0);
+    });
+
+    test('SS 1.0: no matching key -> full payload with ROLE_ID from nlapiGetContext().getRole()', () => {
+
+        const oMessage = onlyMessage(runV1({
+            document: makeRequestDocument('req-8', JSON.stringify(['3|SALESORDER'])).document,
+            nlapiGetContext: () => ({getRole: () => '1018', getPreference: () => null})
+        }));
+
+        expect(oMessage.requestId).toBe('req-8');
+        expect(oMessage.data.FROM_CACHE).toBeUndefined();
+        expect(oMessage.data.ROLE_ID).toBe('1018');
+        expect(oMessage.data.SCRIPTS_DATA).toHaveLength(oaScriptRowsV2.length);
     });
 });

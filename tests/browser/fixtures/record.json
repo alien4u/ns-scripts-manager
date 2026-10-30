@@ -7,8 +7,10 @@
     "noApiPath": "/pages/customerlogin.jsp",
     "formsHtml": "forms.html",
     "stackHtml": "stack.html",
+    "formsEmptyHtml": "forms-empty.html",
     "payload": {
         "RECORD_TYPE": "salesorder",
+        "ROLE_ID": "3",
         "CUSTOM_FORM_ID": "11",
         "CLIENT_LIMIT_REMOVED": false,
         "API_VERSION": "2.x",

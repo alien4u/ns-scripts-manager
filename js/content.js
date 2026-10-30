@@ -2,9 +2,10 @@
  * Content Script (runs in ISOLATED world)
  *
  * Responsibilities:
- * 1. Inject nsmain.js into the page's MAIN world for data query
- * 2. Listen for data messages from nsmain.js (via window.postMessage)
- * 3. Respond to popup requests (GET_SCRIPTS_DATA, FORCE_REFRESH)
+ * 1. Inject nsmain.js into the page's MAIN world for every popup request (RUN_NSMAIN)
+ * 2. Listen for data messages from nsmain.js (via window.postMessage), keeping only the
+ *    reply to the current request id
+ * 3. Respond to popup requests (GET_SCRIPTS_DATA for the matching request id)
  */
 
 (() => {
@@ -17,6 +18,9 @@
     window.__NS_SCRIPTS_MANAGER_INJECTED__ = true;
 
     const oBrowserRuntime = (typeof browser !== 'undefined' && browser.runtime) ? browser.runtime : chrome.runtime;
+
+    /* Popup request whose nsmain reply is kept; replies to older requests are ignored */
+    let sCurrentRequestId = '';
 
     /* ────────────────────────────────────────────────
      * Forward messages from page (nsmain.js) to storage
@@ -33,7 +37,7 @@
             return;
         }
 
-        if (pEvent.data.type === 'SCRIPTS_DATA') {
+        if (pEvent.data.type === 'SCRIPTS_DATA' && pEvent.data.requestId === sCurrentRequestId) {
             window.__NS_SM_SCRIPT_DATA__ = pEvent.data;
         }
 
@@ -56,16 +60,32 @@
      * ──────────────────────────────────────────────── */
 
     /**
-     * Injects the main script into the page context.
+     * Injects the main script into the page context. The request id and the popup's fresh
+     * cache keys go through a hidden DOM element (both worlds can read DOM); nsmain removes it.
+     *
+     * @param {string} pRequestId
+     * @param {string[]} pCacheKeys - '<roleId>|<RECORDTYPE>' keys with a fresh popup cache entry
      */
-    const injectNSMain = () => {
+    const injectNSMain = (pRequestId, pCacheKeys) => {
 
         const sNSId = 'ns-scripts-manager-nsmain';
-        const oExisting = document.getElementById(sNSId);
+        const sDataId = '__ns_sm_main_data__';
 
-        if (oExisting) {
-            oExisting.remove();
-        }
+        [sNSId, sDataId].forEach((pId) => {
+
+            const oExisting = document.getElementById(pId);
+
+            if (oExisting) {
+                oExisting.remove();
+            }
+        });
+
+        const oDataEl = document.createElement('div');
+        oDataEl.id = sDataId;
+        oDataEl.style.display = 'none';
+        oDataEl.dataset.requestId = pRequestId;
+        oDataEl.dataset.cacheKeys = JSON.stringify(Array.isArray(pCacheKeys) ? pCacheKeys : []);
+        document.documentElement.appendChild(oDataEl);
 
         const oScript = document.createElement('script');
         oScript.id = sNSId;
@@ -82,8 +102,6 @@
 
         (document.head || document.documentElement).appendChild(oScript);
     };
-
-    injectNSMain();
 
     /* ────────────────────────────────────────────────
      * Inject nsscheduler.js with a command + optional data
@@ -137,14 +155,17 @@
     oRuntimeOnMessage.addListener((pMsg, pSender, pSendResponse) => {
 
         if (pMsg.type === 'GET_SCRIPTS_DATA') {
-            pSendResponse(window.__NS_SM_SCRIPT_DATA__ || null);
+
+            const oData = window.__NS_SM_SCRIPT_DATA__;
+            pSendResponse(oData && oData.requestId === pMsg.requestId ? oData : null);
         }
 
-        if (pMsg.type === 'FORCE_REFRESH') {
+        if (pMsg.type === 'RUN_NSMAIN') {
 
-            /* Clear stored data and re-inject nsmain.js */
+            /* Every popup request runs nsmain fresh; the previous reply is dropped */
+            sCurrentRequestId = pMsg.requestId || '';
             window.__NS_SM_SCRIPT_DATA__ = null;
-            injectNSMain();
+            injectNSMain(sCurrentRequestId, pMsg.cacheKeys);
             pSendResponse({success: true});
         }
 

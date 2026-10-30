@@ -299,7 +299,7 @@ const runPopupLogic = async () => {
      * stalled request rejects into the caller's non-critical path instead of holding the render.
      *
      * @param {string} pUrl
-     * @returns {Promise<string>} Page HTML, '' when the response is not OK
+     * @returns {Promise<string|null>} Page HTML, null when the response is not OK
      */
     const fetchPageHtml = async (pUrl) => {
 
@@ -308,7 +308,7 @@ const runPopupLogic = async () => {
 
         try {
             const oResponse = await fetch(pUrl, {credentials: 'include', signal: oController.signal});
-            return oResponse.ok ? await oResponse.text() : '';
+            return oResponse.ok ? await oResponse.text() : null;
         } finally {
             clearTimeout(nTimer);
         }
@@ -333,12 +333,13 @@ const runPopupLogic = async () => {
 
     /**
      * Fetches the scripted record page and parses the execution
-     * order (row position per layer). Returns a Map of script
-     * internal ID to its zero-based stack position.
+     * order (row position per layer). Returns [script internal ID,
+     * zero-based stack position] pairs (cacheable as-is).
      *
      * @param {string} pOrigin - NetSuite origin URL
      * @param {string} pRecordType - Record type ID
-     * @returns {Promise<Map<string, number>>}
+     * @returns {Promise<Array<[string, number]>|null>} Pairs (may be empty); null when the page is
+     *     not OK or has none of the layer containers
      */
     const fetchStackOrder = async (pOrigin, pRecordType) => {
 
@@ -346,8 +347,8 @@ const runPopupLogic = async () => {
 
         const sHtml = await fetchPageHtml(sUrl);
 
-        if (!sHtml) {
-            return new Map();
+        if (sHtml === null) {
+            return null;
         }
 
         const oParser = new DOMParser();
@@ -355,6 +356,7 @@ const runPopupLogic = async () => {
 
         const oStackMap = new Map();
         let nOrder = 0;
+        let bFoundLayer = false;
 
         const aLayers = ['server', 'client', 'serverlocalized', 'clientlocalized'];
 
@@ -367,6 +369,8 @@ const runPopupLogic = async () => {
             if (!oContainer) {
                 return;
             }
+
+            bFoundLayer = true;
 
             const aLinks = oContainer.querySelectorAll('a[href*="script.nl?id="]');
 
@@ -384,24 +388,25 @@ const runPopupLogic = async () => {
             });
         });
 
-        return oStackMap;
+        return bFoundLayer ? Array.from(oStackMap) : null;
     };
 
     /**
      * Applies stack order indexes to script data.
      *
      * @param {Array} pScriptsData
-     * @param {Map<string, number>} pStackMap
+     * @param {Array<[string, number]>} pStackOrder - fetchStackOrder pairs
      */
-    const applyStackOrder = (pScriptsData, pStackMap) => {
+    const applyStackOrder = (pScriptsData, pStackOrder) => {
 
-        const nFallback = pStackMap.size;
+        const oStackMap = new Map(pStackOrder);
+        const nFallback = oStackMap.size;
 
         pScriptsData.forEach((pScript) => {
 
             const sScriptId = String(pScript.SCRIPT);
-            pScript.STACK_ORDER = pStackMap.has(sScriptId)
-                ? pStackMap.get(sScriptId)
+            pScript.STACK_ORDER = oStackMap.has(sScriptId)
+                ? oStackMap.get(sScriptId)
                 : nFallback;
         });
     };
@@ -413,22 +418,22 @@ const runPopupLogic = async () => {
     /**
      * Fetches the lazy-loaded Custom Forms list of the scripted record page and returns
      * the form-level client scripts (rows with a Script value). Columns are located by
-     * header text. STATE compares each row's form with the current record's form.
+     * header text. Rows carry no record-specific state, so they can be cached per record type.
      *
      * @param {string} pOrigin - NetSuite origin URL
      * @param {string} pRecordType - Record type ID
-     * @param {string} pCustomFormId - Current record's form id, '' when unknown
-     * @returns {Promise<Array>}
+     * @returns {Promise<Array|null>} Rows (may be empty); null when the page is not OK or the
+     *     table / Form and Script columns are missing
      */
-    const fetchFormScripts = async (pOrigin, pRecordType, pCustomFormId) => {
+    const fetchFormScripts = async (pOrigin, pRecordType) => {
 
         const sUrl = `${pOrigin}/app/common/scripting/scriptedrecord.nl` +
             `?r=T&id=${pRecordType.toUpperCase()}&machine=forms`;
 
         const sHtml = await fetchPageHtml(sUrl);
 
-        if (!sHtml) {
-            return [];
+        if (sHtml === null) {
+            return null;
         }
 
         const oDoc = new DOMParser().parseFromString(stripEventHandlers(sHtml), 'text/html');
@@ -436,7 +441,7 @@ const runPopupLogic = async () => {
         const oHeaderRow = oTable?.querySelector('tr.uir-machine-headerrow, tr.uir-list-headerrow');
 
         if (!oHeaderRow) {
-            return [];
+            return null;
         }
 
         /* Header text (lowercased) -> column index */
@@ -451,7 +456,7 @@ const runPopupLogic = async () => {
         const nScriptCol = oColumns['script'];
 
         if (nFormCol === undefined || nScriptCol === undefined) {
-            return [];
+            return null;
         }
 
         /**
@@ -503,13 +508,6 @@ const runPopupLogic = async () => {
             const sFormUrl = resolveCellHref(pRow.cells[nFormCol]);
             const sFormId = sFormUrl ? (new URL(sFormUrl).searchParams.get('id') || '') : '';
 
-            /* Without both form ids the row may run here, so it stays unknown */
-            let sState = 'unknown_form';
-
-            if (pCustomFormId && sFormId) {
-                sState = sFormId === pCustomFormId ? 'current_form' : 'other_form';
-            }
-
             oaFormScripts.push({
                 FORM_NAME: getCellText(pRow, nFormCol),
                 FORM_ID: sFormId,
@@ -519,8 +517,7 @@ const runPopupLogic = async () => {
                 PAGE_INIT_FN: getCellText(pRow, oColumns['page init function']),
                 SAVE_RECORD_FN: getCellText(pRow, oColumns['save record function']),
                 FIELD_CHANGED_FN: getCellText(pRow, oColumns['field changed function']),
-                VALIDATE_LINE_FN: getCellText(pRow, oColumns['validate line function']),
-                STATE: sState
+                VALIDATE_LINE_FN: getCellText(pRow, oColumns['validate line function'])
             });
         });
 
@@ -2571,27 +2568,260 @@ const runPopupLogic = async () => {
     });
 
     /* ────────────────────────────────────────────────
+     * Record-Type Cache (chrome.storage.session: memory only, shared across tabs)
+     * Key: <origin>|<roleId>|<RECORDTYPE>
+     * Entry: {savedAt, payload: {SCRIPTS_DATA, WORKFLOWS_DATA, API_VERSION},
+     *         stackOrder: pairs | null, formScripts: rows | null}  (null = fetch failed)
+     * ──────────────────────────────────────────────── */
+
+    const CACHE_TTL_MS = 2 * 60 * 1000;
+    const CACHE_MAX_ENTRIES = 50;
+
+    /* Without storage.session there is no cache; everything else works */
+    const oSessionStore = chrome.storage?.session || null;
+
+    /**
+     * Current time. Test-only hook: the popup harness sets window.__NS_SM_TEST_NOW__ before
+     * popup.js loads to move the clock; nothing sets it in the extension.
+     *
+     * @returns {number}
+     */
+    const getNow = () => {
+
+        return typeof window.__NS_SM_TEST_NOW__ === 'function' ? window.__NS_SM_TEST_NOW__() : Date.now();
+    };
+
+    /**
+     * Reads the fresh cache entries of this NetSuite origin.
+     *
+     * @returns {Promise<Object>} '<roleId>|<RECORDTYPE>' -> entry
+     */
+    const readFreshCacheEntries = async () => {
+
+        const oFresh = {};
+
+        if (!oSessionStore) {
+            return oFresh;
+        }
+
+        const oStored = await oSessionStore.get(null).catch(() => ({}));
+        const sPrefix = sOrigin + '|';
+        const nNow = getNow();
+
+        Object.entries(oStored).forEach(([pKey, pEntry]) => {
+
+            if (pKey.startsWith(sPrefix) && typeof pEntry?.savedAt === 'number' &&
+                nNow - pEntry.savedAt < CACHE_TTL_MS) {
+                oFresh[pKey.slice(sPrefix.length)] = pEntry;
+            }
+        });
+
+        return oFresh;
+    };
+
+    /**
+     * Writes one cache entry. Housekeeping on every write: expired entries are dropped and
+     * at most CACHE_MAX_ENTRIES are kept (oldest dropped first).
+     *
+     * @param {string} pCacheKey - <origin>|<roleId>|<RECORDTYPE>
+     * @param {Object} pEntry
+     */
+    const writeCacheEntry = async (pCacheKey, pEntry) => {
+
+        if (!oSessionStore) {
+            return;
+        }
+
+        const oStored = await oSessionStore.get(null).catch(() => ({}));
+        const nNow = getNow();
+        const aRemove = [];
+        const aLive = [];
+
+        Object.entries(oStored).forEach(([pKey, pStored]) => {
+
+            if (pKey === pCacheKey) {
+                return;
+            }
+
+            if (typeof pStored?.savedAt !== 'number' || nNow - pStored.savedAt >= CACHE_TTL_MS) {
+                aRemove.push(pKey);
+            } else {
+                aLive.push({key: pKey, savedAt: pStored.savedAt});
+            }
+        });
+
+        /* Room for the entry being written: drop the oldest live entries beyond the cap */
+        const nExcess = aLive.length + 1 - CACHE_MAX_ENTRIES;
+
+        if (nExcess > 0) {
+            aLive.sort((pA, pB) => pA.savedAt - pB.savedAt);
+            aLive.slice(0, nExcess).forEach((pLive) => aRemove.push(pLive.key));
+        }
+
+        if (aRemove.length > 0) {
+            await oSessionStore.remove(aRemove).catch(() => {});
+        }
+
+        await oSessionStore.set({[pCacheKey]: pEntry}).catch(() => {});
+    };
+
+    /* ────────────────────────────────────────────────
      * Data Polling Logic
      * ──────────────────────────────────────────────── */
 
+    /** Request id of the latest data request; replies and work for older requests are dropped */
+    let sActiveRequestId = '';
+
     /**
-     * Polls the content script for data with retries.
+     * Completes a data reply: merges a light (cached) reply with its entry, fetches the missing
+     * scripted record parts, updates the cache, derives form states from the fresh form id and
+     * renders.
+     *
+     * @param {Object} pData - nsmain payload (full, or light with FROM_CACHE)
+     * @param {Object} pFreshEntries - Entries whose keys were sent with this request
+     * @param {string} pRequestId
+     * @param {boolean} pForceRefresh
+     */
+    const completeAndRender = async (pData, pFreshEntries, pRequestId, pForceRefresh) => {
+
+        const bFromCache = pData.FROM_CACHE === true;
+        const sTypeKey = `${pData.ROLE_ID || ''}|${(pData.RECORD_TYPE || '').toUpperCase()}`;
+        const oEntry = bFromCache ? (pFreshEntries[sTypeKey] || null) : null;
+
+        if (bFromCache && (!oEntry || getNow() - oEntry.savedAt >= CACHE_TTL_MS)) {
+
+            /* Entry gone or expired since the keys were sent: one full run, never a loop */
+            if (pForceRefresh) {
+                showMessage('Timed out waiting for data. Try clicking Refresh.', true);
+            } else {
+                await fetchAndRenderData(true);
+            }
+            return;
+        }
+
+        /* Store in memory for re-renders (sort/toggle changes); per-run values come from pData */
+        oLastData = bFromCache ? {...oEntry.payload, SCRIPT_ERROR: '', WORKFLOW_ERROR: '', ...pData} : pData;
+        oLastData.FORM_SCRIPTS_DATA = [];
+
+        let aStackOrder = bFromCache ? oEntry.stackOrder : null;
+        let aFormRows = bFromCache ? oEntry.formScripts : null;
+        const bFetchStack = aStackOrder === null;
+        const bFetchForms = aFormRows === null;
+
+        if (oLastData.RECORD_TYPE) {
+
+            /* Enable Scripted Records button now that we have the record type */
+            if (oScriptedRecordsBtn) {
+                oScriptedRecordsBtn.disabled = false;
+            }
+
+            /*
+             * Scripted record page fetches run in parallel and only for parts not cached: stack
+             * order only matters with deployments ([] without them), form scripts are listed even
+             * without them. Both are non-critical -- null (failure) renders without them.
+             */
+            const [oStackResult, oFormsResult] = await Promise.allSettled([
+                bFetchStack && oLastData.SCRIPTS_DATA?.length
+                    ? fetchStackOrder(sOrigin, oLastData.RECORD_TYPE)
+                    : (aStackOrder || []),
+                bFetchForms ? fetchFormScripts(sOrigin, oLastData.RECORD_TYPE) : aFormRows
+            ]);
+
+            aStackOrder = oStackResult.status === 'fulfilled' ? oStackResult.value : null;
+            aFormRows = oFormsResult.status === 'fulfilled' ? oFormsResult.value : null;
+        }
+
+        /* A newer request (Refresh) took over while the pages were fetched */
+        if (pRequestId !== sActiveRequestId) {
+            return;
+        }
+
+        const sCacheKey = pData.ROLE_ID ? `${sOrigin}|${sTypeKey}` : '';
+
+        if (sCacheKey && !oLastData.SCRIPT_ERROR && !oLastData.WORKFLOW_ERROR) {
+
+            if (!bFromCache) {
+                await writeCacheEntry(sCacheKey, {
+                    savedAt: getNow(),
+                    payload: {
+                        SCRIPTS_DATA: oLastData.SCRIPTS_DATA,
+                        WORKFLOWS_DATA: oLastData.WORKFLOWS_DATA,
+                        API_VERSION: oLastData.API_VERSION
+                    },
+                    stackOrder: aStackOrder,
+                    formScripts: aFormRows
+                });
+            } else if ((bFetchStack && aStackOrder) || (bFetchForms && aFormRows)) {
+
+                /* Filling a failed part keeps savedAt: the entry still expires 2 minutes after its full run */
+                await writeCacheEntry(sCacheKey, {...oEntry, stackOrder: aStackOrder, formScripts: aFormRows});
+            }
+        }
+
+        if (aStackOrder && aStackOrder.length > 0) {
+            applyStackOrder(oLastData.SCRIPTS_DATA, aStackOrder);
+            bStackOrderAvailable = true;
+        }
+
+        /* Form state is per record: derived from this run's CUSTOM_FORM_ID, never cached */
+        const sCustomFormId = oLastData.CUSTOM_FORM_ID || '';
+
+        oLastData.FORM_SCRIPTS_DATA = (aFormRows || []).map((pRow) => {
+
+            /* Without both form ids the row may run here, so it stays unknown */
+            let sState = 'unknown_form';
+
+            if (sCustomFormId && pRow.FORM_ID) {
+                sState = pRow.FORM_ID === sCustomFormId ? 'current_form' : 'other_form';
+            }
+
+            return {...pRow, STATE: sState};
+        });
+
+        if (oRefreshBtn) {
+            oRefreshBtn.title = bFromCache
+                ? `Cached ${Math.round((getNow() - oEntry.savedAt) / 1000)}s ago - click to refresh`
+                : 'Refresh data';
+        }
+
+        const {
+            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR,
+            CLIENT_LIMIT_REMOVED
+        } = oLastData;
+
+        oCardsContainer.replaceChildren();
+        renderAll(
+            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR,
+            CLIENT_LIMIT_REMOVED
+        );
+    };
+
+    /**
+     * Polls the content script for the reply to one request with retries. Replies carrying
+     * another request id are ignored; the poll stops when a newer request starts.
      *
      * @param {number} pTabId
      * @param {number} pMaxRetries
      * @param {number} pIntervalMs
+     * @param {string} pRequestId
+     * @param {Object} pFreshEntries - Cache entries whose keys were sent with this request
+     * @param {boolean} pForceRefresh
      */
-    const pollForData = async (pTabId, pMaxRetries, pIntervalMs) => {
+    const pollForData = async (pTabId, pMaxRetries, pIntervalMs, pRequestId, pFreshEntries, pForceRefresh) => {
 
         for (let i = 0; i < pMaxRetries; i++) {
 
             await new Promise((pResolve) => setTimeout(pResolve, pIntervalMs));
 
+            if (pRequestId !== sActiveRequestId) {
+                return;
+            }
+
             try {
 
                 const oResponse = await new Promise((pResolve) => {
 
-                    chrome.tabs.sendMessage(pTabId, {type: 'GET_SCRIPTS_DATA'}, (pResponse) => {
+                    chrome.tabs.sendMessage(pTabId, {type: 'GET_SCRIPTS_DATA', requestId: pRequestId}, (pResponse) => {
 
                         if (chrome.runtime.lastError) {
                             pResolve(null);
@@ -2601,7 +2831,7 @@ const runPopupLogic = async () => {
                     });
                 });
 
-                if (oResponse) {
+                if (oResponse && oResponse.requestId === pRequestId && pRequestId === sActiveRequestId) {
 
                     /* Check for error from nsmain.js; a page without a record or SuiteScript is not an error */
                     if (oResponse.error === 'NO_RECORD' || oResponse.error === 'NO_API_AVAILABLE') {
@@ -2615,50 +2845,7 @@ const runPopupLogic = async () => {
                     }
 
                     if (oResponse.data) {
-
-                        /* Store in memory for re-renders (sort/toggle changes) */
-                        oLastData = oResponse.data;
-                        oLastData.FORM_SCRIPTS_DATA = [];
-
-                        if (oLastData.RECORD_TYPE) {
-
-                            /* Enable Scripted Records button now that we have the record type */
-                            if (oScriptedRecordsBtn) {
-                                oScriptedRecordsBtn.disabled = false;
-                            }
-
-                            /*
-                             * Scripted record page fetches run in parallel: stack order only matters
-                             * with deployments, form scripts are listed even without them.
-                             * Both are non-critical -- continue without them on failure.
-                             */
-                            const [oStackResult, oFormsResult] = await Promise.allSettled([
-                                oLastData.SCRIPTS_DATA?.length
-                                    ? fetchStackOrder(sOrigin, oLastData.RECORD_TYPE)
-                                    : null,
-                                fetchFormScripts(sOrigin, oLastData.RECORD_TYPE, oLastData.CUSTOM_FORM_ID || '')
-                            ]);
-
-                            if (oStackResult.status === 'fulfilled' && oStackResult.value?.size > 0) {
-                                applyStackOrder(oLastData.SCRIPTS_DATA, oStackResult.value);
-                                bStackOrderAvailable = true;
-                            }
-
-                            if (oFormsResult.status === 'fulfilled') {
-                                oLastData.FORM_SCRIPTS_DATA = oFormsResult.value;
-                            }
-                        }
-
-                        const {
-                            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR,
-                            CLIENT_LIMIT_REMOVED
-                        } = oLastData;
-
-                        oCardsContainer.replaceChildren();
-                        renderAll(
-                            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR,
-                            CLIENT_LIMIT_REMOVED
-                        );
+                        await completeAndRender(oResponse.data, pFreshEntries, pRequestId, pForceRefresh);
                         return;
                     }
                 }
@@ -2668,24 +2855,37 @@ const runPopupLogic = async () => {
             }
         }
 
-        showMessage('Timed out waiting for data. Try clicking Refresh.', true);
+        if (pRequestId === sActiveRequestId) {
+            showMessage('Timed out waiting for data. Try clicking Refresh.', true);
+        }
     };
 
     /**
-     * Initiates the data fetch process.
+     * Initiates the data fetch process. Every call is a new request: nsmain runs fresh, and
+     * unless forced it receives the fresh cache keys so it can skip the searches.
      *
-     * @param {boolean} pForceRefresh
+     * @param {boolean} pForceRefresh - true: no cache keys (full nsmain run and page fetches)
      */
     const fetchAndRenderData = async (pForceRefresh) => {
 
+        const sRequestId = crypto.randomUUID();
+        sActiveRequestId = sRequestId;
+
         try {
+
+            const oFreshEntries = pForceRefresh ? {} : await readFreshCacheEntries();
 
             /* Inject content script via background SW */
             const oInjectResponse = await chrome.runtime.sendMessage({
                 type: 'INJECT_AND_GET_DATA',
                 tabId: oTab.id,
-                forceRefresh: !!pForceRefresh
+                requestId: sRequestId,
+                cacheKeys: Object.keys(oFreshEntries)
             });
+
+            if (sRequestId !== sActiveRequestId) {
+                return;
+            }
 
             if (oInjectResponse?.error) {
                 showMessage('Injection failed: ' + oInjectResponse.error, true);
@@ -2693,7 +2893,7 @@ const runPopupLogic = async () => {
             }
 
             /* Poll for data */
-            await pollForData(oTab.id, 8, 400);
+            await pollForData(oTab.id, 8, 400, sRequestId, oFreshEntries, !!pForceRefresh);
 
         } catch (pErr) {
             showMessage('Error: ' + pErr.message, true);

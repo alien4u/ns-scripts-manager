@@ -5,6 +5,50 @@
     const sBaseEditFileUrl = `${window.location.origin}/app/common/record/edittextmediaitem.nl?id=_FILE_ID_&e=T&l=T&target=filesize&syntaxHighlighting=T`;
     const sBaseWorkflowsUrl = `${window.location.origin}/app/common/workflow/setup/workflowmanager.nl?id=`;
 
+    /* Request id and fresh popup cache keys ('<roleId>|<RECORDTYPE>') written by content.js; removed once read */
+    const oRequestEl = document.getElementById('__ns_sm_main_data__');
+    const sRequestId = oRequestEl ? (oRequestEl.dataset.requestId || '') : '';
+    let aCacheKeys = [];
+
+    if (oRequestEl) {
+
+        try {
+            const aParsedKeys = JSON.parse(oRequestEl.dataset.cacheKeys || '[]');
+            aCacheKeys = Array.isArray(aParsedKeys) ? aParsedKeys : [];
+        } catch (e) {
+            aCacheKeys = [];
+        }
+
+        oRequestEl.remove();
+    }
+
+    /**
+     * Posts a SCRIPTS_DATA payload for the current request.
+     *
+     * @param {Object} pData
+     */
+    const postScriptsData = (pData) => {
+
+        window.postMessage({
+            type: 'SCRIPTS_DATA',
+            requestId: sRequestId,
+            error: null,
+            data: pData
+        }, window.location.origin);
+    };
+
+    /**
+     * True when the popup holds a fresh cache entry for this role and record type, so the
+     * deployment and workflow searches can be skipped.
+     *
+     * @param {Object} pFresh - Per-run values (RECORD_TYPE, ROLE_ID, ...)
+     * @returns {boolean}
+     */
+    const isCachedOnPopup = (pFresh) => {
+
+        return !!pFresh.ROLE_ID && aCacheKeys.includes(`${pFresh.ROLE_ID}|${pFresh.RECORD_TYPE.toUpperCase()}`);
+    };
+
     /**
      * Builds the Info Data
      *
@@ -166,6 +210,23 @@
         }
 
         return toBoolean(vPreference);
+    };
+
+    /**
+     * Current user's role internal id (part of the popup cache key).
+     *
+     * @param {Object} [pRuntime] - N/runtime module (SS 2.x path); omitted on the SS 1.0 path
+     * @returns {string} Role id, '' when unavailable
+     */
+    const getRoleId = (pRuntime) => {
+
+        try {
+            /* 2.x returns a number, 1.0 a string */
+            const vRole = pRuntime ? pRuntime.getCurrentUser().role : nlapiGetContext().getRole();
+            return (vRole === undefined || vRole === null) ? '' : String(vRole);
+        } catch (e) {
+            return '';
+        }
     };
 
     /* ────────────────────────────────────────────────
@@ -563,6 +624,7 @@
 
             window.postMessage({
                 type: 'SCRIPTS_DATA',
+                requestId: sRequestId,
                 error: (!sRecordType) ? 'NO_RECORD' : 'GENERIC_RECORD',
                 message: (!sRecordType)
                     ? 'Unable to detect the record type on this page.'
@@ -572,24 +634,30 @@
             return;
         }
 
+        /* Per-run values, never cached by the popup */
+        const oFresh = {
+            RECORD_TYPE: sRecordType,
+            ROLE_ID: getRoleId(null),
+            CUSTOM_FORM_ID: getCustomFormId(sRecordType),
+            CLIENT_LIMIT_REMOVED: getClientLimitRemoved(null),
+            API_VERSION: '1.0'
+        };
+
+        if (isCachedOnPopup(oFresh)) {
+            postScriptsData({FROM_CACHE: true, ...oFresh});
+            return;
+        }
+
         const oScriptsResult = getScriptsDataV1(sRecordType);
         const oWorkflowsResult = getWorkflowsDataV1(sRecordType);
-        const sCustomFormId = getCustomFormId(sRecordType);
 
-        window.postMessage({
-            type: 'SCRIPTS_DATA',
-            error: null,
-            data: {
-                SCRIPTS_DATA: oScriptsResult.data,
-                WORKFLOWS_DATA: oWorkflowsResult.data,
-                SCRIPT_ERROR: oScriptsResult.error || '',
-                WORKFLOW_ERROR: oWorkflowsResult.error || '',
-                RECORD_TYPE: sRecordType,
-                CUSTOM_FORM_ID: sCustomFormId,
-                CLIENT_LIMIT_REMOVED: getClientLimitRemoved(null),
-                API_VERSION: '1.0'
-            }
-        }, window.location.origin);
+        postScriptsData({
+            SCRIPTS_DATA: oScriptsResult.data,
+            WORKFLOWS_DATA: oWorkflowsResult.data,
+            SCRIPT_ERROR: oScriptsResult.error || '',
+            WORKFLOW_ERROR: oWorkflowsResult.error || '',
+            ...oFresh
+        });
     };
 
     /* ────────────────────────────────────────────────
@@ -603,6 +671,7 @@
 
         window.postMessage({
             type: 'SCRIPTS_DATA',
+            requestId: sRequestId,
             error: 'NO_API_AVAILABLE',
             message: 'Neither SuiteScript 2.x (require) nor SuiteScript 1.0 (nlapi) is available on this page.'
         }, window.location.origin);
@@ -626,6 +695,7 @@
                 } else {
                     window.postMessage({
                         type: 'SCRIPTS_DATA',
+                        requestId: sRequestId,
                         error: 'MODULES_LOAD_TIMEOUT',
                         message: 'Timeout loading N/* modules and SuiteScript 1.0 is not available on this page.'
                     }, window.location.origin);
@@ -651,12 +721,27 @@
 
                         window.postMessage({
                             type: 'SCRIPTS_DATA',
+                            requestId: sRequestId,
                             error: (!sRecordType) ? 'NO_RECORD' : 'GENERIC_RECORD',
                             message: (!sRecordType)
                                 ? 'Unable to detect the record type on this page.'
                                 : 'Generic records are not scriptable!'
                         }, window.location.origin);
 
+                        return;
+                    }
+
+                    /* Per-run values, never cached by the popup */
+                    const oFresh = {
+                        RECORD_TYPE: sRecordType,
+                        ROLE_ID: getRoleId(pRuntime),
+                        CUSTOM_FORM_ID: getCustomFormId(sRecordType, pCurrentRecord, pSearch),
+                        CLIENT_LIMIT_REMOVED: getClientLimitRemoved(pRuntime),
+                        API_VERSION: '2.x'
+                    };
+
+                    if (isCachedOnPopup(oFresh)) {
+                        postScriptsData({FROM_CACHE: true, ...oFresh});
                         return;
                     }
 
@@ -677,22 +762,13 @@
                         sWorkflowError = e.message || 'Error querying workflows.';
                     }
 
-                    const sCustomFormId = getCustomFormId(sRecordType, pCurrentRecord, pSearch);
-
-                    window.postMessage({
-                        type: 'SCRIPTS_DATA',
-                        error: null,
-                        data: {
-                            SCRIPTS_DATA: aScriptsData,
-                            WORKFLOWS_DATA: aWorkflowsData,
-                            SCRIPT_ERROR: sScriptError,
-                            WORKFLOW_ERROR: sWorkflowError,
-                            RECORD_TYPE: sRecordType,
-                            CUSTOM_FORM_ID: sCustomFormId,
-                            CLIENT_LIMIT_REMOVED: getClientLimitRemoved(pRuntime),
-                            API_VERSION: '2.x'
-                        }
-                    }, window.location.origin);
+                    postScriptsData({
+                        SCRIPTS_DATA: aScriptsData,
+                        WORKFLOWS_DATA: aWorkflowsData,
+                        SCRIPT_ERROR: sScriptError,
+                        WORKFLOW_ERROR: sWorkflowError,
+                        ...oFresh
+                    });
                 },
                 (pError) => {
 
@@ -709,6 +785,7 @@
                     } else {
                         window.postMessage({
                             type: 'SCRIPTS_DATA',
+                            requestId: sRequestId,
                             error: 'MODULES_LOAD_FAILED',
                             message: pError.message || 'Unknown error loading NetSuite modules.'
                         }, window.location.origin);
@@ -727,6 +804,7 @@
                 } else {
                     window.postMessage({
                         type: 'SCRIPTS_DATA',
+                        requestId: sRequestId,
                         error: 'MODULES_LOAD_FAILED',
                         message: oError.message || 'Unexpected error in require block.'
                     }, window.location.origin);
