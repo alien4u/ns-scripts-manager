@@ -1,4 +1,5 @@
-<!-- Synthetic Custom Forms fragment (scriptedrecord.nl?r=T&id=SALESORDER&machine=forms). No account data. -->
+<!-- Synthetic Custom Forms fragment (scriptedrecord.nl?r=T&id=SALESORDER&machine=forms). No account data.
+     Inline event-handler attributes mimic NetSuite markup (CSP violation check). -->
 <div class="uir-machine-table-container" id="forms_layer">
 <table id="forms_splits" class="listtable listborder uir-list-table" width="100%" border="0" cellspacing="0" cellpadding="0">
     <tr class="uir-machine-headerrow" id="forms_headerrow">
@@ -14,8 +15,8 @@
         <td class="listheadertd listheadertextb uir-column-medium"><div class="listheader">Field Changed Function</div></td>
         <td class="listheadertdright listheadertextb uir-column-medium"><div class="listheader">Validate Line Function</div></td>
     </tr>
-    <tr class="uir-list-row-tr uir-list-row-even" id="forms_row1">
-        <td class="uir-list-row-cell listtexthl"><a class="dottedlink" href="/app/common/custom/custform.nl?id=11&amp;nl=F&amp;e=T">Harness Sales Order Form A</a></td>
+    <tr class="uir-list-row-tr uir-list-row-even" id="forms_row1" onclick="nlRowClick(this, 1);">
+        <td class="uir-list-row-cell listtexthl"><a class="dottedlink" href="/app/common/custom/custform.nl?id=11&amp;nl=F&amp;e=T" onmouseover='nsTip(this, "form")'>Harness Sales Order Form A</a></td>
         <td class="uir-list-row-cell listtexthl">No</td>
         <td class="uir-list-row-cell listtexthl">&nbsp;</td>
         <td class="uir-list-row-cell listtexthl">&nbsp;</td>
@@ -25,12 +26,12 @@
         <td class="uir-list-row-cell listtexthl">&nbsp;</td>
         <td class="uir-list-row-cell listtexthl">&nbsp;</td>
     </tr>
-    <tr class="uir-list-row-tr uir-list-row-odd" id="forms_row2">
+    <tr class="uir-list-row-tr uir-list-row-odd" id="forms_row2" onmouseout=nsRowOut(this)>
         <td class="uir-list-row-cell listtext"><a class="dottedlink" href="/app/common/custom/custform.nl?id=12&amp;nl=F&amp;e=T">Harness Sales Order Form B</a></td>
         <td class="uir-list-row-cell listtext">No</td>
         <td class="uir-list-row-cell listtext">&nbsp;</td>
         <td class="uir-list-row-cell listtext">&nbsp;</td>
-        <td class="uir-list-row-cell listtext"><a class="dottedlink" href="/app/common/scripting/script.nl?id=902">Lima Form Script</a></td>
+        <td class="uir-list-row-cell listtext"><a class="dottedlink" href="/app/common/scripting/script.nl?id=902" onclick="return nlOpenWindow(this);">Lima Form Script</a></td>
         <td class="uir-list-row-cell listtext">&nbsp;</td>
         <td class="uir-list-row-cell listtext">&nbsp;</td>
         <td class="uir-list-row-cell listtext">limaFieldChanged</td>
@@ -50,7 +51,7 @@
     <tr class="uir-list-row-tr uir-list-row-odd" id="forms_row4">
         <td class="uir-list-row-cell listtext"><a class="dottedlink" href="/app/common/custom/custform.nl?id=14&amp;nl=F&amp;e=T">Harness Sales Order Form D</a></td>
         <td class="uir-list-row-cell listtext">Yes</td>
-        <td class="uir-list-row-cell listtext">Harness Bundle</td>
+        <td class="uir-list-row-cell listtext"><img src="/images/icons/bundle.gif" onerror="this.remove()" alt="">Harness Bundle</td>
         <td class="uir-list-row-cell listtext">Harness Publisher</td>
         <td class="uir-list-row-cell listtext">Mike Form Script</td>
         <td class="uir-list-row-cell listtext">mikePageInit</td>

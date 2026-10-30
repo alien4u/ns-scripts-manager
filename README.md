@@ -221,6 +221,7 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - New Form Scripts group lists form-level client scripts from the record's custom forms, marking the current form
 - Scheduler Check now reports undeployed and inactive-script deployments on the SuiteScript 2.x path
 - Client and User Event count warnings count only running deployments (active or testing); the Client limit warning honors the new "Remove Client Script Deployment Limit per Record" preference (NetSuite 2026.2+)
+- No more Content Security Policy errors on the extension Errors page when reading NetSuite pages (stack order and form scripts)
 - Removed the Custom GL Lines (Plug-in) group, which could never populate
 - Removed the sponsor footer
 

@@ -13,7 +13,12 @@ const sRoot = resolve(import.meta.dir, '../..');
 const sHost = '127.0.0.1';
 const nPort = Number(process.argv[2] || process.env.PORT || 8765);
 const sHarnessPath = '/tests/browser/popup-harness.html';
-const oHeaders = {'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store'};
+/* Same script policy as the extension pages, so DOMParser CSP violations surface in the harness */
+const oHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': 'script-src \'self\'; object-src \'self\''
+};
 
 const oServer = Bun.serve({
     hostname: sHost,

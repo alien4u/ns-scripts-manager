@@ -38,6 +38,7 @@
 
     const fnNativeFetch = window.fetch.bind(window);
     const aPageErrors = [];
+    const aCspViolations = [];
     const oLog = {fetches: [], aborted: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: []};
     const oStore = {};
     const oState = {response: null, tabUrl: '', stallForms: false};
@@ -51,6 +52,12 @@
 
         aPageErrors.push(String(pEvent.reason));
     });
+
+    /* Registered before popup.js loads; serve.js sends script-src 'self' like the extension */
+    document.addEventListener('securitypolicyviolation', (pEvent) => {
+
+        aCspViolations.push(`${pEvent.effectiveDirective}: ${pEvent.sample || pEvent.blockedURI}`);
+    }, true);
 
     /* ────────────────────────────────────────────────
      * Assertion helpers
@@ -1402,6 +1409,11 @@
         }
 
         check('No uncaught page errors', aPageErrors.length === 0, aPageErrors.join(' | '));
+        check(
+            'No CSP violations (securitypolicyviolation) while parsing NetSuite pages',
+            aCspViolations.length === 0,
+            `${aCspViolations.length} violation(s): ${aCspViolations.slice(0, 5).join(' | ')}`
+        );
     };
 
     /**

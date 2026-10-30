@@ -314,6 +314,19 @@ const runPopupLogic = async () => {
         }
     };
 
+    /**
+     * Removes inline event-handler attributes (onclick=, onload=, ...) from fetched HTML.
+     * DOMParser documents inherit the extension CSP, and Chrome reports one script-src
+     * violation per handler attribute on the extension Errors page even though nothing runs.
+     *
+     * @param {string} pHtml
+     * @returns {string}
+     */
+    const stripEventHandlers = (pHtml) => {
+
+        return pHtml.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    };
+
     /* ────────────────────────────────────────────────
      * Stack Order — Scripted Record Page Scraper
      * ──────────────────────────────────────────────── */
@@ -338,7 +351,7 @@ const runPopupLogic = async () => {
         }
 
         const oParser = new DOMParser();
-        const oDoc = oParser.parseFromString(sHtml, 'text/html');
+        const oDoc = oParser.parseFromString(stripEventHandlers(sHtml), 'text/html');
 
         const oStackMap = new Map();
         let nOrder = 0;
@@ -418,7 +431,7 @@ const runPopupLogic = async () => {
             return [];
         }
 
-        const oDoc = new DOMParser().parseFromString(sHtml, 'text/html');
+        const oDoc = new DOMParser().parseFromString(stripEventHandlers(sHtml), 'text/html');
         const oTable = oDoc.getElementById('forms_splits');
         const oHeaderRow = oTable?.querySelector('tr.uir-machine-headerrow, tr.uir-list-headerrow');
 

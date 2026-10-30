@@ -1,22 +1,24 @@
 <!DOCTYPE html>
-<!-- Synthetic Scripted Record page (scriptedrecord.nl?id=SALESORDER), stack order layers only. No account data. -->
+<!-- Synthetic Scripted Record page (scriptedrecord.nl?id=SALESORDER), stack order layers only. No account data.
+     Inline event-handler attributes mimic NetSuite markup; parsed unstripped under script-src 'self' they
+     raise securitypolicyviolation events. -->
 <html lang="en">
 <head><title>Scripted Record: Sales Order</title></head>
-<body>
+<body onload="nsInitPage();">
 <div data-nsps-layer="server">
     <div class="uir-machine-table-container">
         <table>
-            <tr><td><a href="/app/common/scripting/script.nl?id=303">Charlie Audit UE</a></td></tr>
-            <tr><td><a href="/app/common/scripting/script.nl?id=302">Bravo Pricing UE</a></td></tr>
-            <tr><td><a href="/app/common/scripting/script.nl?id=301">Alpha Sync UE</a></td></tr>
+            <tr onmouseover='nsRowHover(this, "server")'><td><a href="/app/common/scripting/script.nl?id=303" onclick="return nlOpenWindow(this);">Charlie Audit UE</a></td></tr>
+            <tr><td><a href="/app/common/scripting/script.nl?id=302" onclick='return nlOpenWindow(this);'>Bravo Pricing UE</a></td></tr>
+            <tr onmouseout=nsRowOut(this)><td><a href="/app/common/scripting/script.nl?id=301">Alpha Sync UE</a></td></tr>
         </table>
     </div>
 </div>
 <div data-nsps-layer="client">
     <div class="uir-machine-table-container">
         <table>
-            <tr><td><a href="/app/common/scripting/script.nl?id=305">Echo Validation Client</a></td></tr>
-            <tr><td><a href="/app/common/scripting/script.nl?id=304">Delta Defaults Client</a></td></tr>
+            <tr><td><img src="/images/nav/ns_x.gif" onerror="this.style.display='none'" alt=""><a href="/app/common/scripting/script.nl?id=305" ONCLICK = "return false">Echo Validation Client</a></td></tr>
+            <tr><td><a href="/app/common/scripting/script.nl?id=304" onkeydown=nsKey(event)>Delta Defaults Client</a></td></tr>
         </table>
     </div>
 </div>
