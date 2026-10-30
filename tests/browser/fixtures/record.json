@@ -1,0 +1,147 @@
+{
+    "_comment": "Synthetic popup harness fixture. payload = nsmain.js SCRIPTS_DATA payload; formsHtml / stackHtml are resolved relative to this file; expect = data the harness cannot derive from the payload alone.",
+    "origin": "https://harness.app.netsuite.com",
+    "recordPath": "/app/accounting/transactions/salesord.nl?id=100&whence=",
+    "createPath": "/app/accounting/transactions/salesord.nl?whence=",
+    "noRecordPath": "/app/common/scripting/scriptrecord.nl?id=501",
+    "formsHtml": "forms.html",
+    "stackHtml": "stack.html",
+    "payload": {
+        "RECORD_TYPE": "salesorder",
+        "CUSTOM_FORM_ID": "11",
+        "API_VERSION": "2.x",
+        "SCRIPT_ERROR": "",
+        "WORKFLOW_ERROR": "",
+        "SCRIPTS_DATA": [
+            {
+                "ID": 501, "SCRIPT": 301, "DEPLOYMENT_ID": "customdeploy_alpha_sync_ue",
+                "SCRIPT_NAME": "Alpha Sync UE", "SCRIPT_TYPE": "User Event",
+                "DEPLOYED": true, "STATUS": "Released", "INACTIVE": false, "STATE": "active",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=301&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=501",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=701&e=T",
+                "INFO": "API Version: 2.1\nFile: alpha_sync_ue.js", "HIDE_IN_BUNDLE": false,
+                "BEFORE_SUBMIT_FN": "beforeSubmit", "AFTER_SUBMIT_FN": "afterSubmit"
+            },
+            {
+                "ID": 502, "SCRIPT": 301,
+                "DEPLOYMENT_ID": "customdeploy_harness_alpha_sync_secondary_deployment_with_a_very_long_identifier",
+                "SCRIPT_NAME": "Alpha Sync UE", "SCRIPT_TYPE": "User Event",
+                "DEPLOYED": false, "STATUS": "Released", "INACTIVE": false, "STATE": "undeployed",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=301&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=502",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=701&e=T",
+                "INFO": "API Version: 2.1\nFile: alpha_sync_ue.js", "HIDE_IN_BUNDLE": false,
+                "BEFORE_SUBMIT_FN": "beforeSubmit", "AFTER_SUBMIT_FN": "afterSubmit"
+            },
+            {
+                "ID": 503, "SCRIPT": 302, "DEPLOYMENT_ID": "customdeploy_bravo_pricing_ue",
+                "SCRIPT_NAME": "Bravo Pricing UE", "SCRIPT_TYPE": "User Event",
+                "DEPLOYED": true, "STATUS": "Testing", "INACTIVE": false, "STATE": "testing",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=302&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=503",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=702&e=T",
+                "INFO": "API Version: 2.1", "HIDE_IN_BUNDLE": false,
+                "BEFORE_LOAD_FN": "beforeLoad"
+            },
+            {
+                "ID": 504, "SCRIPT": 303, "DEPLOYMENT_ID": "customdeploy_charlie_audit_ue",
+                "SCRIPT_NAME": "Charlie Audit UE", "SCRIPT_TYPE": "User Event",
+                "DEPLOYED": true, "STATUS": "Released", "INACTIVE": true, "STATE": "script_inactive",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=303&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=504",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=703&e=T",
+                "INFO": "API Version: 2.0", "HIDE_IN_BUNDLE": true,
+                "AFTER_SUBMIT_FN": "afterSubmit"
+            },
+            {
+                "ID": 505, "SCRIPT": 304, "DEPLOYMENT_ID": "customdeploy_delta_defaults_cs",
+                "SCRIPT_NAME": "Delta Defaults Client", "SCRIPT_TYPE": "Client",
+                "DEPLOYED": true, "STATUS": "Not Scheduled", "INACTIVE": false, "STATE": "not_released",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=304&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=505",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=704&e=T",
+                "INFO": "API Version: 2.1", "HIDE_IN_BUNDLE": false,
+                "PAGE_INIT_FN": "pageInit"
+            },
+            {
+                "ID": 506, "SCRIPT": 305, "DEPLOYMENT_ID": "customdeploy_echo_validation_cs",
+                "SCRIPT_NAME": "Echo Validation Client", "SCRIPT_TYPE": "Client",
+                "DEPLOYED": true, "STATUS": "Released", "INACTIVE": false, "STATE": "active",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=305&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=506",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=705&e=T",
+                "INFO": "API Version: 2.1", "HIDE_IN_BUNDLE": false,
+                "SAVE_RECORD_FN": "saveRecord", "VALIDATE_FIELD_FN": "validateField"
+            },
+            {
+                "ID": 507, "SCRIPT": 306, "DEPLOYMENT_ID": "customdeploy_foxtrot_bulk_mu",
+                "SCRIPT_NAME": "Foxtrot Bulk Mass Update", "SCRIPT_TYPE": "Mass Update",
+                "DEPLOYED": true, "STATUS": "", "INACTIVE": false, "STATE": "not_released",
+                "URL": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=306&whence=",
+                "DEPLOYMENT_URL": "https://harness.app.netsuite.com/app/common/scripting/scriptrecord.nl?id=507",
+                "FILE_URL": "https://harness.app.netsuite.com/app/common/record/edittextmediaitem.nl?id=706&e=T",
+                "INFO": "N/A", "HIDE_IN_BUNDLE": false
+            }
+        ],
+        "WORKFLOWS_DATA": [
+            {
+                "WORKFLOW": "601", "WORKFLOW_NAME": "Golf Approval WF", "DESCRIPTION": "Synthetic",
+                "STATUS": "Released", "INACTIVE": false, "STATE": "active",
+                "URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=601",
+                "EDIT_URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=601&e=T"
+            },
+            {
+                "WORKFLOW": "602", "WORKFLOW_NAME": "Hotel Credit WF", "DESCRIPTION": "",
+                "STATUS": "Testing", "INACTIVE": false, "STATE": "testing",
+                "URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=602",
+                "EDIT_URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=602&e=T"
+            },
+            {
+                "WORKFLOW": "603", "WORKFLOW_NAME": "India Legacy WF", "DESCRIPTION": "",
+                "STATUS": "Released", "INACTIVE": true, "STATE": "inactive",
+                "URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=603",
+                "EDIT_URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=603&e=T"
+            },
+            {
+                "WORKFLOW": "604", "WORKFLOW_NAME": "Juliet Notify WF", "DESCRIPTION": "",
+                "STATUS": "Not Initiating", "INACTIVE": false, "STATE": "not_released",
+                "URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=604",
+                "EDIT_URL": "https://harness.app.netsuite.com/app/common/workflow/setup/workflowmanager.nl?id=604&e=T"
+            }
+        ]
+    },
+    "expect": {
+        "formScripts": [
+            {
+                "scriptName": "Kilo Form Script", "formName": "Harness Sales Order Form A", "formId": "11",
+                "formUrl": "https://harness.app.netsuite.com/app/common/custom/custform.nl?id=11&nl=F&e=T",
+                "scriptUrl": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=901",
+                "hooks": ["pageInit", "saveRecord"]
+            },
+            {
+                "scriptName": "Lima Form Script", "formName": "Harness Sales Order Form B", "formId": "12",
+                "formUrl": "https://harness.app.netsuite.com/app/common/custom/custform.nl?id=12&nl=F&e=T",
+                "scriptUrl": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=902",
+                "hooks": ["fieldChanged", "validateLine"]
+            },
+            {
+                "scriptName": "Mike Form Script", "formName": "Harness Sales Order Form D", "formId": "14",
+                "formUrl": "https://harness.app.netsuite.com/app/common/custom/custform.nl?id=14&nl=F&e=T",
+                "scriptUrl": "",
+                "hooks": ["pageInit"]
+            }
+        ],
+        "formsWithoutScript": ["Harness Sales Order Form C"],
+        "stackOrder": {
+            "User Event": [
+                "customdeploy_charlie_audit_ue",
+                "customdeploy_bravo_pricing_ue",
+                "customdeploy_alpha_sync_ue",
+                "customdeploy_harness_alpha_sync_secondary_deployment_with_a_very_long_identifier"
+            ],
+            "Client": ["customdeploy_echo_validation_cs", "customdeploy_delta_defaults_cs"]
+        },
+        "truncatedDeploymentId": "customdeploy_harness_alpha_sync_secondary_deployment_with_a_very_long_identifier"
+    }
+}

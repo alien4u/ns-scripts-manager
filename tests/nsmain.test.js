@@ -1,0 +1,394 @@
+import {describe, expect, test} from 'bun:test';
+import {
+    ORIGIN,
+    FakeSearchColumn,
+    createCurrentRecordModule,
+    createQueryModule,
+    createRequire,
+    createResultV1,
+    createResultV2,
+    createSearchModule,
+    runPageScript
+} from './fakes.js';
+
+/* ── Synthetic fixtures ── */
+
+/**
+ * Builds a deployment row as N/query asMappedResults() returns it (checkboxes are booleans).
+ *
+ * @param {number} pId
+ * @param {string} pStatus
+ * @param {boolean} pDeployed
+ * @param {boolean} pInactive
+ * @returns {Object}
+ */
+const makeScriptRow = (pId, pStatus, pDeployed, pInactive) => ({
+    ID: pId,
+    SCRIPT: pId + 90,
+    DEPLOYMENT_ID: `customdeploy_t_${pId}`,
+    STATUS: pStatus,
+    DEPLOYED: pDeployed,
+    SCRIPT_INACTIVE: pInactive
+});
+
+const oaScriptRowsV2 = [
+    makeScriptRow(11, 'Released', true, false),
+    makeScriptRow(12, 'Testing', true, false),
+    makeScriptRow(13, 'Released', false, false),
+    makeScriptRow(14, 'Released', true, true),
+    makeScriptRow(15, 'Testing', false, true),
+    makeScriptRow(16, 'Not Scheduled', true, false),
+    makeScriptRow(17, '', true, false)
+];
+
+const oExpectedScriptStates = {
+    11: 'active',
+    12: 'testing',
+    13: 'undeployed',
+    14: 'script_inactive',
+    15: 'script_inactive',
+    16: 'not_released',
+    17: 'not_released'
+};
+
+/* Same deployments as SS 1.0 nlobjSearchResult rows ('T'/'F' checkboxes) */
+const oaScriptResultsV1 = oaScriptRowsV2.map((pRow) => createResultV1(String(pRow.ID), {
+    'script': String(pRow.SCRIPT),
+    'scriptid': pRow.DEPLOYMENT_ID,
+    'status': pRow.STATUS.toUpperCase().replace(' ', ''),
+    'isdeployed': pRow.DEPLOYED ? 'T' : 'F',
+    'script.isinactive': pRow.SCRIPT_INACTIVE ? 'T' : 'F',
+    'script.name': `Synthetic ${pRow.ID}`
+}, {
+    'status': pRow.STATUS,
+    'script.scripttype': 'User Event'
+}));
+
+/* Workflows: [internal id, release status value, release status text, isinactive] */
+const aWorkflowDefs = [
+    ['21', 'RELEASED', 'Released', true],
+    ['22', 'TESTING', 'Testing', false],
+    ['23', 'RELEASED', 'Released', false],
+    ['24', 'NOTINITIATING', '', false],
+    ['25', 'SUSPENDED', 'Suspended', false]
+];
+
+const oExpectedWorkflowStates = {
+    21: 'inactive',
+    22: 'testing',
+    23: 'active',
+    24: 'not_released',
+    25: 'not_released'
+};
+
+const oaWorkflowResultsV2 = aWorkflowDefs.map(([pId, pValue, pText, pInactive]) => createResultV2(pId, {
+    internalid: pId,
+    name: `Synthetic Workflow ${pId}`,
+    description: '',
+    releasestatus: pValue,
+    isinactive: pInactive
+}, {releasestatus: pText}));
+
+const oaWorkflowResultsV1 = aWorkflowDefs.map(([pId, pValue, pText, pInactive]) => createResultV1(pId, {
+    name: `Synthetic Workflow ${pId}`,
+    description: '',
+    releasestatus: pValue,
+    isinactive: pInactive ? 'T' : 'F'
+}, {releasestatus: pText}));
+
+/* ── Runners ── */
+
+/**
+ * Runs nsmain.js on the SS 2.x path.
+ *
+ * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults}
+ * @returns {Array}
+ */
+const runV2 = (pOptions) => {
+
+    const oSearch = createSearchModule(
+        (pType) => (pType === 'workflow' ? (pOptions.workflowResults || []) : []),
+        pOptions.lookupFields
+    );
+
+    return runPageScript('nsmain', {
+        require: createRequire({
+            'N/query': createQueryModule(pOptions.scriptRows || []),
+            'N/search': oSearch,
+            'N/util': {extend: (pTarget, pSource) => Object.assign(pTarget, pSource)},
+            'N/currentRecord': createCurrentRecordModule(pOptions.record)
+        })
+    });
+};
+
+/**
+ * Runs nsmain.js on the SS 1.0 path (no require on the page).
+ *
+ * @param {Object} pGlobals - nlapi* overrides
+ * @returns {Array}
+ */
+const runV1 = (pGlobals) => {
+
+    return runPageScript('nsmain', {
+        nlobjSearchColumn: FakeSearchColumn,
+        nlapiSearchRecord: (pType) => {
+
+            if (pType === 'scriptdeployment') {
+                return oaScriptResultsV1;
+            }
+
+            return pType === 'workflow' ? oaWorkflowResultsV1 : null;
+        },
+        nlapiGetRecordType: () => 'salesorder',
+        nlapiGetFieldValue: () => '',
+        nlapiGetRecordId: () => '',
+        nlapiLookupField: () => '',
+        ...pGlobals
+    });
+};
+
+/**
+ * Builds an N/currentRecord record double.
+ *
+ * @param {string} pType
+ * @param {*} pId
+ * @param {Function} [pGetValue]
+ * @returns {Object}
+ */
+const makeRecord = (pType, pId, pGetValue) => ({type: pType, id: pId, getValue: pGetValue || (() => undefined)});
+
+/**
+ * Returns the single SCRIPTS_DATA message posted by nsmain.js.
+ *
+ * @param {Array} pPosted
+ * @returns {Object}
+ */
+const onlyMessage = (pPosted) => {
+
+    expect(pPosted).toHaveLength(1);
+    expect(pPosted[0].targetOrigin).toBe(ORIGIN);
+    expect(pPosted[0].message.type).toBe('SCRIPTS_DATA');
+    return pPosted[0].message;
+};
+
+/**
+ * Maps rows to {id: STATE}.
+ *
+ * @param {Array} pRows
+ * @param {string} pIdKey
+ * @returns {Object}
+ */
+const statesById = (pRows, pIdKey) => Object.fromEntries(pRows.map((pRow) => [String(pRow[pIdKey]), pRow.STATE]));
+
+/* ── Tests ── */
+
+describe('nsmain.js script STATE', () => {
+
+    test('SS 2.x: every STATE branch from boolean checkboxes', () => {
+
+        const oMessage = onlyMessage(runV2({record: makeRecord('salesorder', 7), scriptRows: oaScriptRowsV2}));
+        const aScripts = oMessage.data.SCRIPTS_DATA;
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.API_VERSION).toBe('2.x');
+        expect(statesById(aScripts, 'ID')).toEqual(oExpectedScriptStates);
+
+        const oNotScheduled = aScripts.find((pRow) => pRow.ID === 16);
+        expect(oNotScheduled.DEPLOYED).toBe(true);
+        expect(aScripts.find((pRow) => pRow.ID === 13).DEPLOYED).toBe(false);
+        expect(aScripts.find((pRow) => pRow.ID === 14).INACTIVE).toBe(true);
+    });
+
+    test('SS 2.x: DEPLOYMENT_URL points at the deployment record', () => {
+
+        const oMessage = onlyMessage(runV2({record: makeRecord('salesorder', 7), scriptRows: oaScriptRowsV2}));
+        const oRow = oMessage.data.SCRIPTS_DATA.find((pRow) => pRow.ID === 11);
+
+        expect(oRow.DEPLOYMENT_ID).toBe('customdeploy_t_11');
+        expect(oRow.DEPLOYMENT_URL).toBe(`${ORIGIN}/app/common/scripting/scriptrecord.nl?id=11`);
+    });
+
+    test('SS 1.0: every STATE branch from T/F checkboxes', () => {
+
+        const oMessage = onlyMessage(runV1({}));
+        const aScripts = oMessage.data.SCRIPTS_DATA;
+
+        expect(oMessage.data.API_VERSION).toBe('1.0');
+        expect(statesById(aScripts, 'ID')).toEqual(oExpectedScriptStates);
+        expect(aScripts.find((pRow) => pRow.ID === '16').DEPLOYED).toBe(true);
+        expect(aScripts.find((pRow) => pRow.ID === '13').DEPLOYED).toBe(false);
+        expect(aScripts.find((pRow) => pRow.ID === '14').INACTIVE).toBe(true);
+        expect(aScripts.find((pRow) => pRow.ID === '12').DEPLOYMENT_URL)
+            .toBe(`${ORIGIN}/app/common/scripting/scriptrecord.nl?id=12`);
+    });
+});
+
+describe('nsmain.js workflow STATE', () => {
+
+    test('SS 2.x: inactive / testing / released / not released', () => {
+
+        const oMessage = onlyMessage(runV2({
+            record: makeRecord('salesorder', 7),
+            workflowResults: oaWorkflowResultsV2
+        }));
+        const aWorkflows = oMessage.data.WORKFLOWS_DATA;
+
+        expect(statesById(aWorkflows, 'WORKFLOW')).toEqual(oExpectedWorkflowStates);
+        expect(aWorkflows.find((pRow) => pRow.WORKFLOW === '21').INACTIVE).toBe(true);
+        expect(aWorkflows.find((pRow) => pRow.WORKFLOW === '21').STATUS).toBe('Released');
+        expect(aWorkflows.find((pRow) => pRow.WORKFLOW === '24').STATUS).toBe('Not Initiating');
+    });
+
+    test('SS 1.0: inactive / testing / released / not released', () => {
+
+        const oMessage = onlyMessage(runV1({}));
+        const aWorkflows = oMessage.data.WORKFLOWS_DATA;
+
+        expect(statesById(aWorkflows, 'WORKFLOW')).toEqual(oExpectedWorkflowStates);
+        expect(aWorkflows.find((pRow) => pRow.WORKFLOW === '21').INACTIVE).toBe(true);
+        expect(aWorkflows.find((pRow) => pRow.WORKFLOW === '23').INACTIVE).toBe(false);
+    });
+});
+
+describe('nsmain.js record detection', () => {
+
+    test('SS 2.x: no record type posts NO_RECORD', () => {
+
+        const oMessage = onlyMessage(runV2({record: makeRecord('', undefined)}));
+
+        expect(oMessage.error).toBe('NO_RECORD');
+        expect(oMessage.data).toBeUndefined();
+    });
+
+    test('SS 2.x: generic record posts GENERIC_RECORD', () => {
+
+        const oMessage = onlyMessage(runV2({record: makeRecord('generic', 3)}));
+
+        expect(oMessage.error).toBe('GENERIC_RECORD');
+        expect(oMessage.message).toBe('Generic records are not scriptable!');
+    });
+
+    test('SS 1.0: no record type posts NO_RECORD', () => {
+
+        const oMessage = onlyMessage(runV1({nlapiGetRecordType: () => ''}));
+
+        expect(oMessage.error).toBe('NO_RECORD');
+    });
+
+    test('SS 1.0: generic record posts GENERIC_RECORD', () => {
+
+        const oMessage = onlyMessage(runV1({nlapiGetRecordType: () => 'generic'}));
+
+        expect(oMessage.error).toBe('GENERIC_RECORD');
+    });
+});
+
+describe('nsmain.js CUSTOM_FORM_ID', () => {
+
+    test('SS 2.x: taken from currentRecord.getValue without a lookup', () => {
+
+        let nLookups = 0;
+        const oRecord = makeRecord('salesorder', 7, (pOptions) => (pOptions.fieldId === 'customform' ? '42' : ''));
+        const oMessage = onlyMessage(runV2({
+            record: oRecord,
+            lookupFields: () => {
+
+                nLookups++;
+                return {customform: [{value: '99', text: 'Synthetic'}]};
+            }
+        }));
+
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('42');
+        expect(nLookups).toBe(0);
+    });
+
+    test('SS 2.x: view mode falls back to search.lookupFields', () => {
+
+        let oLookupArgs = null;
+        const oMessage = onlyMessage(runV2({
+            record: makeRecord('salesorder', 7),
+            lookupFields: (pOptions) => {
+
+                oLookupArgs = pOptions;
+                return {customform: [{value: '55', text: 'Synthetic Form'}]};
+            }
+        }));
+
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('55');
+        expect(JSON.parse(JSON.stringify(oLookupArgs))).toEqual({type: 'salesorder', id: '7', columns: ['customform']});
+    });
+
+    test('SS 2.x: lookupFields bare {value, text} shape', () => {
+
+        const oMessage = onlyMessage(runV2({
+            record: makeRecord('salesorder', 7),
+            lookupFields: () => ({customform: {value: '56', text: 'Synthetic Form'}})
+        }));
+
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('56');
+    });
+
+    test('SS 2.x: getValue and lookupFields failures yield empty string', () => {
+
+        const oRecord = makeRecord('salesorder', 7, () => {
+
+            throw new Error('field not available');
+        });
+        const oMessage = onlyMessage(runV2({
+            record: oRecord,
+            lookupFields: () => {
+
+                throw new Error('lookup failed');
+            }
+        }));
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('');
+    });
+
+    test('SS 2.x: no record id (create mode, field empty) skips the lookup', () => {
+
+        const oMessage = onlyMessage(runV2({record: makeRecord('salesorder', null, () => '')}));
+
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('');
+    });
+
+    test('SS 1.0: taken from nlapiGetFieldValue', () => {
+
+        const oMessage = onlyMessage(runV1({nlapiGetFieldValue: (pField) => (pField === 'customform' ? '42' : '')}));
+
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('42');
+    });
+
+    test('SS 1.0: view mode falls back to nlapiLookupField', () => {
+
+        let aLookupArgs = null;
+        const oMessage = onlyMessage(runV1({
+            nlapiGetRecordId: () => '7',
+            nlapiLookupField: (...pArgs) => {
+
+                aLookupArgs = pArgs;
+                return '55';
+            }
+        }));
+
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('55');
+        expect(aLookupArgs).toEqual(['salesorder', '7', 'customform']);
+    });
+
+    test('SS 1.0: lookup failures yield empty string', () => {
+
+        const fnThrow = () => {
+
+            throw new Error('not available');
+        };
+        const oMessage = onlyMessage(runV1({
+            nlapiGetFieldValue: fnThrow,
+            nlapiGetRecordId: fnThrow,
+            nlapiLookupField: fnThrow
+        }));
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('');
+    });
+});

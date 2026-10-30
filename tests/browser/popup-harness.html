@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Resolve popup-relative paths (css/, js/, img/) against the repo root, like popup.html -->
+    <base href="../../">
+    <title>Popup Harness - NetSuite Scripts Manager</title>
+    <link rel="stylesheet" type="text/css" href="css/main.css">
+    <style>
+        #harness-results {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 460px;
+            overflow: auto;
+            padding: 12px 16px;
+            background: #fff;
+            color: #222;
+            border-left: 2px solid #24385B;
+            font: 12px/1.5 'SF Mono', Menlo, Consolas, monospace;
+            z-index: 1000;
+        }
+
+        #harness-results h1 {
+            margin: 0 0 6px;
+            font-size: 14px;
+        }
+
+        #harness-results nav a {
+            margin-right: 10px;
+        }
+
+        #harness-results ol {
+            padding-left: 22px;
+        }
+
+        #harness-results .pass {
+            color: #155724;
+        }
+
+        #harness-results .fail {
+            color: #b00020;
+            font-weight: 700;
+        }
+    </style>
+    <script src="tests/browser/harness.js" defer></script>
+</head>
+<body></body>
+</html>

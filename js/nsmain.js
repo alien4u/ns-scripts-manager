@@ -1,6 +1,7 @@
 (() => {
 
     const sBaseScriptRecordUrl = `${window.location.origin}/app/common/scripting/script.nl?id=`;
+    const sBaseDeploymentUrl = `${window.location.origin}/app/common/scripting/scriptrecord.nl?id=`;
     const sBaseEditFileUrl = `${window.location.origin}/app/common/record/edittextmediaitem.nl?id=_FILE_ID_&e=T&l=T&target=filesize&syntaxHighlighting=T`;
     const sBaseWorkflowsUrl = `${window.location.origin}/app/common/workflow/setup/workflowmanager.nl?id=`;
 
@@ -45,6 +46,98 @@
         }
 
         return !!pValue;
+    };
+
+    /**
+     * Derives the run state of a script deployment or workflow.
+     * Precedence: inactive, Deployed checkbox unchecked (scripts only), then status.
+     *
+     * @param {string} pInactiveState - State returned when pInactive is true
+     * @param {boolean} pInactive - script.isinactive or workflow isinactive
+     * @param {boolean} pDeployed - Deployment isdeployed (always true for workflows)
+     * @param {string} pStatus - Status display text
+     * @returns {string} pInactiveState | undeployed | active | testing | not_released
+     */
+    const getRunState = (pInactiveState, pInactive, pDeployed, pStatus) => {
+
+        if (pInactive) {
+            return pInactiveState;
+        }
+
+        if (!pDeployed) {
+            return 'undeployed';
+        }
+
+        const sStatus = (pStatus || '').toLowerCase();
+
+        if (sStatus === 'released') {
+            return 'active';
+        }
+
+        if (sStatus === 'testing') {
+            return 'testing';
+        }
+
+        return 'not_released';
+    };
+
+    /**
+     * Resolves the current record's custom form id. Create/edit mode exposes the field on the
+     * page; view mode does not, so the value is looked up by record id.
+     *
+     * @param {string} pRecordType
+     * @param {Object} [pCurrentRecord] - N/currentRecord module (SS 2.x path)
+     * @param {Object} [pSearch] - N/search module (SS 2.x path)
+     * @returns {string} Form internal id, '' when unknown
+     */
+    const getCustomFormId = (pRecordType, pCurrentRecord, pSearch) => {
+
+        let sFormId = '';
+        let sRecordId = '';
+
+        if (pCurrentRecord) {
+
+            try {
+                const oCurrRec = pCurrentRecord.get();
+                sRecordId = oCurrRec.id ? String(oCurrRec.id) : '';
+                sFormId = oCurrRec.getValue({fieldId: 'customform'}) || '';
+            } catch (e) {
+                /* Field not available on this page */
+            }
+
+            if (!sFormId && sRecordId) {
+                try {
+                    const oLookup = pSearch.lookupFields({type: pRecordType, id: sRecordId, columns: ['customform']});
+                    /* Select fields return [{value, text}]; the docs also show a bare {value, text} */
+                    const oForm = Array.isArray(oLookup.customform) ? oLookup.customform[0] : oLookup.customform;
+                    sFormId = (oForm && oForm.value) || '';
+                } catch (e) {
+                    /* Lookup failed, form unknown */
+                }
+            }
+
+            return String(sFormId);
+        }
+
+        try {
+            sFormId = nlapiGetFieldValue('customform') || '';
+        } catch (e) {
+            /* Field not available on this page */
+        }
+
+        if (!sFormId) {
+            try {
+                sRecordId = nlapiGetRecordId() || '';
+
+                if (sRecordId) {
+                    sFormId = nlapiLookupField(pRecordType, sRecordId, 'customform') || '';
+                }
+            } catch (e) {
+                /* Lookup failed, form unknown */
+            }
+        }
+
+        return String(sFormId);
     };
 
     /* ────────────────────────────────────────────────
@@ -135,12 +228,11 @@
         aResults.forEach((pData) => {
 
             pData.INACTIVE = toBoolean(pData.SCRIPT_INACTIVE);
-
-            const sStatus = (pData.STATUS || '').toLowerCase();
-            const bIsDeployed = toBoolean(pData.DEPLOYED);
-            pData.DEPLOYED = bIsDeployed && (sStatus === 'released' || sStatus === 'testing');
+            pData.DEPLOYED = toBoolean(pData.DEPLOYED);
+            pData.STATE = getRunState('script_inactive', pData.INACTIVE, pData.DEPLOYED, pData.STATUS);
 
             pData.URL = `${sBaseScriptRecordUrl}${pData.SCRIPT}&whence=`;
+            pData.DEPLOYMENT_URL = `${sBaseDeploymentUrl}${pData.ID}`;
             pData.FILE_URL = `${sBaseEditFileUrl.replace('_FILE_ID_', pData.SCRIPT_FILE)}`;
             pData.INFO = buildInfo(pData.API_VERSION, pData.DESCRIPTION, pData.SCRIPT_FILE_NAME);
             pData.HIDE_IN_BUNDLE = toBoolean(pData.FILE_HIDE_IN_BUNDLE);
@@ -207,7 +299,8 @@
             WORKFLOW: {name: 'internalid'},
             WORKFLOW_NAME: {name: 'name', sort: pSearch.Sort.ASC},
             DESCRIPTION: {name: 'description'},
-            STATUS: {name: 'releasestatus'}
+            STATUS: {name: 'releasestatus'},
+            INACTIVE: {name: 'isinactive'}
         };
         const aColumns = [...Object.keys(oColumnsMap).map((pColumn) => pSearch.createColumn(oColumnsMap[pColumn]))];
 
@@ -228,6 +321,8 @@
             oData.STATUS = normalizeWorkflowStatus(
                 pResult.getText(oColumnsMap.STATUS) || pResult.getValue(oColumnsMap.STATUS)
             );
+            oData.INACTIVE = toBoolean(oData.INACTIVE);
+            oData.STATE = getRunState('inactive', oData.INACTIVE, true, oData.STATUS);
 
             oData.URL = `${sBaseWorkflowsUrl}${oData.WORKFLOW}`;
             oData.EDIT_URL = `${sBaseWorkflowsUrl}${oData.WORKFLOW}&e=T`;
@@ -291,22 +386,24 @@
 
         oSearchResults.forEach((pResult) => {
 
+            const sDeploymentId = pResult.getId();
             const sScriptId = pResult.getValue('script');
             const sFileId = pResult.getValue('scriptfile', 'script');
-            const sStatus = (pResult.getText('status') || pResult.getValue('status') || '').toLowerCase();
-            const bIsDeployed = pResult.getValue('isdeployed') === 'T';
-            const bDeployed = bIsDeployed && (sStatus === 'released' || sStatus === 'testing');
-            const bScriptInactive = pResult.getValue('isinactive', 'script') === 'T';
+            const sStatus = pResult.getText('status') || pResult.getValue('status') || '';
+            const bDeployed = toBoolean(pResult.getValue('isdeployed'));
+            const bScriptInactive = toBoolean(pResult.getValue('isinactive', 'script'));
 
             aResults.push({
-                ID: pResult.getId(),
+                ID: sDeploymentId,
                 SCRIPT: sScriptId,
                 DEPLOYMENT_ID: pResult.getValue('scriptid'),
                 SCRIPT_NAME: pResult.getValue('name', 'script') || '',
                 SCRIPT_TYPE: pResult.getText('scripttype', 'script') || pResult.getValue('scripttype', 'script') || 'Unknown',
                 DEPLOYED: bDeployed,
-                STATUS: pResult.getText('status') || pResult.getValue('status') || '',
+                STATUS: sStatus,
                 INACTIVE: bScriptInactive,
+                STATE: getRunState('script_inactive', bScriptInactive, bDeployed, sStatus),
+                DEPLOYMENT_URL: `${sBaseDeploymentUrl}${sDeploymentId}`,
                 API_VERSION: pResult.getText('apiversion', 'script') || pResult.getValue('apiversion', 'script') || '',
                 DESCRIPTION: pResult.getValue('description', 'script') || '',
                 SCRIPT_FILE: sFileId,
@@ -352,7 +449,8 @@
                     new nlobjSearchColumn('internalid'),
                     new nlobjSearchColumn('name').setSort(false),
                     new nlobjSearchColumn('description'),
-                    new nlobjSearchColumn('releasestatus')
+                    new nlobjSearchColumn('releasestatus'),
+                    new nlobjSearchColumn('isinactive')
                 ]
             );
         } catch (e) {
@@ -366,14 +464,18 @@
         oSearchResults.forEach((pResult) => {
 
             const sWorkflowId = pResult.getId();
+            const sStatus = normalizeWorkflowStatus(
+                pResult.getText('releasestatus') || pResult.getValue('releasestatus')
+            );
+            const bInactive = toBoolean(pResult.getValue('isinactive'));
 
             aResults.push({
                 WORKFLOW: sWorkflowId,
                 WORKFLOW_NAME: pResult.getValue('name') || '',
                 DESCRIPTION: pResult.getValue('description') || '',
-                STATUS: normalizeWorkflowStatus(
-                    pResult.getText('releasestatus') || pResult.getValue('releasestatus')
-                ),
+                STATUS: sStatus,
+                INACTIVE: bInactive,
+                STATE: getRunState('inactive', bInactive, true, sStatus),
                 URL: `${sBaseWorkflowsUrl}${sWorkflowId}`,
                 EDIT_URL: `${sBaseWorkflowsUrl}${sWorkflowId}&e=T`
             });
@@ -433,7 +535,7 @@
 
             window.postMessage({
                 type: 'SCRIPTS_DATA',
-                error: 'GENERIC_RECORD',
+                error: (!sRecordType) ? 'NO_RECORD' : 'GENERIC_RECORD',
                 message: (!sRecordType)
                     ? 'Unable to detect the record type on this page.'
                     : 'Generic records are not scriptable!'
@@ -444,6 +546,7 @@
 
         const oScriptsResult = getScriptsDataV1(sRecordType);
         const oWorkflowsResult = getWorkflowsDataV1(sRecordType);
+        const sCustomFormId = getCustomFormId(sRecordType);
 
         window.postMessage({
             type: 'SCRIPTS_DATA',
@@ -454,6 +557,7 @@
                 SCRIPT_ERROR: oScriptsResult.error || '',
                 WORKFLOW_ERROR: oWorkflowsResult.error || '',
                 RECORD_TYPE: sRecordType,
+                CUSTOM_FORM_ID: sCustomFormId,
                 API_VERSION: '1.0'
             }
         }, window.location.origin);
@@ -518,7 +622,7 @@
 
                         window.postMessage({
                             type: 'SCRIPTS_DATA',
-                            error: 'GENERIC_RECORD',
+                            error: (!sRecordType) ? 'NO_RECORD' : 'GENERIC_RECORD',
                             message: (!sRecordType)
                                 ? 'Unable to detect the record type on this page.'
                                 : 'Generic records are not scriptable!'
@@ -544,6 +648,8 @@
                         sWorkflowError = e.message || 'Error querying workflows.';
                     }
 
+                    const sCustomFormId = getCustomFormId(sRecordType, pCurrentRecord, pSearch);
+
                     window.postMessage({
                         type: 'SCRIPTS_DATA',
                         error: null,
@@ -553,6 +659,7 @@
                             SCRIPT_ERROR: sScriptError,
                             WORKFLOW_ERROR: sWorkflowError,
                             RECORD_TYPE: sRecordType,
+                            CUSTOM_FORM_ID: sCustomFormId,
                             API_VERSION: '2.x'
                         }
                     }, window.location.origin);

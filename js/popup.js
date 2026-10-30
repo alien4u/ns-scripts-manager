@@ -83,9 +83,9 @@ const runPopupLogic = async () => {
     const DEFAULT_GROUP_ORDER = [
         'User Event',
         'Client',
+        'Form Scripts',
         'Mass Update',
         'Workflow Action',
-        'Custom GL Lines (Plug-in)',
         'Workflows'
     ];
 
@@ -201,7 +201,13 @@ const runPopupLogic = async () => {
     }
 
     if (oStoredSettings.groupOrder && Array.isArray(oStoredSettings.groupOrder)) {
-        aGroupOrder = oStoredSettings.groupOrder;
+
+        /* Plug-in deployments have no record type, so this group can never populate */
+        aGroupOrder = oStoredSettings.groupOrder.filter((pGroup) => pGroup !== 'Custom GL Lines (Plug-in)');
+
+        if (aGroupOrder.length !== oStoredSettings.groupOrder.length) {
+            chrome.storage.local.set({groupOrder: aGroupOrder}).catch(() => {});
+        }
     }
 
     /* ────────────────────────────────────────────────
@@ -363,18 +369,252 @@ const runPopupLogic = async () => {
     };
 
     /* ────────────────────────────────────────────────
-     * Rendering Functions
+     * Form Scripts — Scripted Record Custom Forms Scraper
      * ──────────────────────────────────────────────── */
 
     /**
-     * Determines if a script deployment is actively running.
+     * Fetches the lazy-loaded Custom Forms list of the scripted record page and returns
+     * the form-level client scripts (rows with a Script value). Columns are located by
+     * header text. STATE compares each row's form with the current record's form.
      *
-     * @param {Object} pScript
-     * @returns {boolean}
+     * @param {string} pOrigin - NetSuite origin URL
+     * @param {string} pRecordType - Record type ID
+     * @param {string} pCustomFormId - Current record's form id, '' when unknown
+     * @returns {Promise<Array>}
      */
-    const isScriptActive = (pScript) => {
+    const fetchFormScripts = async (pOrigin, pRecordType, pCustomFormId) => {
 
-        return pScript.DEPLOYED && !pScript.INACTIVE;
+        const sUrl = `${pOrigin}/app/common/scripting/scriptedrecord.nl` +
+            `?r=T&id=${pRecordType.toUpperCase()}&machine=forms`;
+
+        const oResponse = await fetch(sUrl, {credentials: 'include'});
+
+        if (!oResponse.ok) {
+            return [];
+        }
+
+        const sHtml = await oResponse.text();
+        const oDoc = new DOMParser().parseFromString(sHtml, 'text/html');
+        const oTable = oDoc.getElementById('forms_splits');
+        const oHeaderRow = oTable?.querySelector('tr.uir-machine-headerrow, tr.uir-list-headerrow');
+
+        if (!oHeaderRow) {
+            return [];
+        }
+
+        /* Header text (lowercased) -> column index */
+        const oColumns = {};
+
+        Array.from(oHeaderRow.cells).forEach((pCell, pIndex) => {
+
+            oColumns[pCell.textContent.replace(/\s+/g, ' ').trim().toLowerCase()] = pIndex;
+        });
+
+        const nFormCol = oColumns['form'];
+        const nScriptCol = oColumns['script'];
+
+        if (nFormCol === undefined || nScriptCol === undefined) {
+            return [];
+        }
+
+        /**
+         * Returns the whitespace-normalized text of a row cell, '' when the column is missing.
+         *
+         * @param {HTMLTableRowElement} pRow
+         * @param {number|undefined} pColumn
+         * @returns {string}
+         */
+        const getCellText = (pRow, pColumn) => {
+
+            const oCell = pColumn === undefined ? null : pRow.cells[pColumn];
+            return oCell ? oCell.textContent.replace(/\s+/g, ' ').trim() : '';
+        };
+
+        /**
+         * Resolves the raw href of the first link in a cell against the NetSuite origin.
+         * The parsed .href would resolve against the extension origin, so the attribute is used.
+         *
+         * @param {HTMLTableCellElement} pCell
+         * @returns {string} Absolute NetSuite URL, '' when there is no link or it leaves the origin
+         */
+        const resolveCellHref = (pCell) => {
+
+            const sHref = pCell?.querySelector('a[href]')?.getAttribute('href');
+
+            if (!sHref) {
+                return '';
+            }
+
+            try {
+                const oUrl = new URL(sHref, pOrigin);
+                return oUrl.origin === pOrigin ? oUrl.href : '';
+            } catch (pErr) {
+                return '';
+            }
+        };
+
+        const oaFormScripts = [];
+
+        oTable.querySelectorAll('tr.uir-list-row-tr').forEach((pRow) => {
+
+            const sScriptName = getCellText(pRow, nScriptCol);
+
+            if (!sScriptName) {
+                return;
+            }
+
+            const sFormUrl = resolveCellHref(pRow.cells[nFormCol]);
+            const sFormId = sFormUrl ? (new URL(sFormUrl).searchParams.get('id') || '') : '';
+
+            let sState = 'unknown_form';
+
+            if (pCustomFormId) {
+                sState = sFormId === pCustomFormId ? 'current_form' : 'other_form';
+            }
+
+            oaFormScripts.push({
+                FORM_NAME: getCellText(pRow, nFormCol),
+                FORM_ID: sFormId,
+                FORM_URL: sFormUrl,
+                SCRIPT_NAME: sScriptName,
+                SCRIPT_URL: resolveCellHref(pRow.cells[nScriptCol]),
+                PAGE_INIT_FN: getCellText(pRow, oColumns['page init function']),
+                SAVE_RECORD_FN: getCellText(pRow, oColumns['save record function']),
+                FIELD_CHANGED_FN: getCellText(pRow, oColumns['field changed function']),
+                VALIDATE_LINE_FN: getCellText(pRow, oColumns['validate line function']),
+                STATE: sState
+            });
+        });
+
+        return oaFormScripts;
+    };
+
+    /* ────────────────────────────────────────────────
+     * Rendering Functions
+     * ──────────────────────────────────────────────── */
+
+    const FORM_SCRIPT_TITLE = 'Runs only on records that use this form';
+
+    /**
+     * Appends the state badge (plus a dot for items that run) to a card meta row and dims
+     * the card when the item does not run. STATE is set by nsmain.js for scripts and
+     * workflows and by fetchFormScripts for form scripts.
+     *
+     * @param {HTMLDivElement} pCard
+     * @param {HTMLDivElement} pMeta
+     * @param {Object} pItem - Item with STATE and STATUS
+     * @param {string} pTestingTitle - Tooltip for the testing state
+     */
+    const appendStateBadge = (pCard, pMeta, pItem, pTestingTitle) => {
+
+        const sStatus = pItem.STATUS || '';
+        let sText = sStatus.toLowerCase() || 'n/a';
+        let sLook = 'inactive';
+        let sTitle = '';
+
+        switch (pItem.STATE) {
+
+            case 'active':
+                sLook = 'active';
+                break;
+
+            case 'testing':
+                sText = 'testing';
+                sLook = 'testing';
+                sTitle = pTestingTitle;
+                break;
+
+            case 'undeployed':
+                sText = 'undeployed';
+                sTitle = 'The deployment\'s Deployed checkbox is unchecked';
+                break;
+
+            case 'script_inactive':
+                sText = 'script inactive';
+                sTitle = 'The script record is marked Inactive';
+                break;
+
+            case 'inactive':
+                sText = 'inactive';
+                sTitle = 'The workflow is marked Inactive';
+                break;
+
+            case 'current_form':
+                sText = 'current form';
+                sLook = 'active';
+                break;
+
+            case 'other_form':
+                sText = 'other form';
+                sTitle = FORM_SCRIPT_TITLE;
+                break;
+
+            case 'unknown_form':
+                sText = 'form script';
+                sLook = 'neutral';
+                sTitle = FORM_SCRIPT_TITLE;
+                break;
+
+            default:
+                sTitle = 'Status: ' + (sStatus || 'n/a');
+        }
+
+        const oBadge = document.createElement('span');
+        oBadge.className = 'sm-badge ' + sLook;
+        oBadge.textContent = sText;
+
+        if (sTitle) {
+            oBadge.title = sTitle;
+        }
+
+        pMeta.appendChild(oBadge);
+
+        if (sLook === 'inactive') {
+            pCard.classList.add('inactive');
+        }
+
+        if (sLook === 'active' || sLook === 'testing') {
+
+            const oDot = document.createElement('span');
+            oDot.className = 'sm-deployed-dot';
+            oDot.title = 'Active';
+
+            if (sLook === 'testing') {
+                oDot.classList.add('testing');
+                oDot.title = 'Testing';
+            }
+
+            pMeta.appendChild(oDot);
+        }
+    };
+
+    /**
+     * Appends entry point tags for every hook whose function name is set.
+     *
+     * @param {HTMLDivElement} pCard
+     * @param {Object} pItem
+     * @param {Array<{key: string, label: string}>} pHookDefs
+     */
+    const appendHookTags = (pCard, pItem, pHookDefs) => {
+
+        const aActiveHooks = pHookDefs.filter((pDef) => pItem[pDef.key]);
+
+        if (aActiveHooks.length === 0) {
+            return;
+        }
+
+        const oHooks = document.createElement('div');
+        oHooks.className = 'card-hooks';
+
+        aActiveHooks.forEach((pDef) => {
+
+            const oTag = document.createElement('span');
+            oTag.className = 'sm-hook-tag';
+            oTag.textContent = pDef.label;
+            oHooks.appendChild(oTag);
+        });
+
+        pCard.appendChild(oHooks);
     };
 
     /**
@@ -387,10 +627,6 @@ const runPopupLogic = async () => {
 
         const oCard = document.createElement('div');
         oCard.className = 'script-card';
-
-        if (!isScriptActive(pScript)) {
-            oCard.classList.add('inactive');
-        }
 
         /* ── Top Row: Name + Actions ── */
         const oTop = document.createElement('div');
@@ -464,33 +700,27 @@ const runPopupLogic = async () => {
         oTop.appendChild(oActions);
         oCard.appendChild(oTop);
 
-        /* ── Meta Row: Status Badge + Deployed Dot ── */
+        /* ── Meta Row: State Badge + Dot + Deployment ID ── */
         const oMeta = document.createElement('div');
         oMeta.className = 'card-meta';
 
-        const oBadge = document.createElement('span');
-        oBadge.className = 'sm-badge';
-        oBadge.textContent = (pScript.STATUS || 'N/A').toLowerCase();
+        appendStateBadge(oCard, oMeta, pScript, 'Testing: runs only for the script owner');
 
-        if (isScriptActive(pScript)) {
-            oBadge.classList.add('active');
-        } else {
-            oBadge.classList.add('inactive');
-        }
+        if (pScript.DEPLOYMENT_ID) {
 
-        oMeta.appendChild(oBadge);
-
-        if (isScriptActive(pScript)) {
-            const oDot = document.createElement('span');
-            oDot.className = 'sm-deployed-dot';
-            oDot.title = 'Deployed';
-            oMeta.appendChild(oDot);
+            const oDeploymentLink = document.createElement('a');
+            oDeploymentLink.className = 'sm-deploy-id';
+            oDeploymentLink.href = pScript.DEPLOYMENT_URL;
+            oDeploymentLink.target = '_blank';
+            oDeploymentLink.title = pScript.DEPLOYMENT_ID;
+            oDeploymentLink.textContent = pScript.DEPLOYMENT_ID;
+            oMeta.appendChild(oDeploymentLink);
         }
 
         oCard.appendChild(oMeta);
 
         /* ── Hooks Row: Entry Point Badges ── */
-        const aHookDefs = [
+        appendHookTags(oCard, pScript, [
             {key: 'BEFORE_LOAD_FN', label: 'beforeLoad'},
             {key: 'BEFORE_SUBMIT_FN', label: 'beforeSubmit'},
             {key: 'AFTER_SUBMIT_FN', label: 'afterSubmit'},
@@ -498,25 +728,7 @@ const runPopupLogic = async () => {
             {key: 'FIELD_CHANGED_FN', label: 'fieldChanged'},
             {key: 'SAVE_RECORD_FN', label: 'saveRecord'},
             {key: 'VALIDATE_FIELD_FN', label: 'validateField'},
-        ];
-
-        const aActiveHooks = aHookDefs.filter((pDef) => pScript[pDef.key]);
-
-        if (aActiveHooks.length > 0) {
-
-            const oHooks = document.createElement('div');
-            oHooks.className = 'card-hooks';
-
-            aActiveHooks.forEach((pDef) => {
-
-                const oTag = document.createElement('span');
-                oTag.className = 'sm-hook-tag';
-                oTag.textContent = pDef.label;
-                oHooks.appendChild(oTag);
-            });
-
-            oCard.appendChild(oHooks);
-        }
+        ]);
 
         return oCard;
     };
@@ -579,28 +791,81 @@ const runPopupLogic = async () => {
         const oMeta = document.createElement('div');
         oMeta.className = 'card-meta';
 
-        const oBadge = document.createElement('span');
-        oBadge.className = 'sm-badge';
-        oBadge.textContent = (pWorkflow.STATUS || 'N/A').toLowerCase();
-
-        const bReleased = (pWorkflow.STATUS || '').toLowerCase() === 'released';
-
-        if (bReleased) {
-            oBadge.classList.add('active');
-        } else {
-            oBadge.classList.add('inactive');
-        }
-
-        oMeta.appendChild(oBadge);
-
-        if (bReleased) {
-            const oDot = document.createElement('span');
-            oDot.className = 'sm-deployed-dot';
-            oDot.title = 'Released';
-            oMeta.appendChild(oDot);
-        }
+        appendStateBadge(oCard, oMeta, pWorkflow, 'Testing: initiates only for the workflow owner');
 
         oCard.appendChild(oMeta);
+
+        return oCard;
+    };
+
+    /**
+     * Creates a form-level client script card.
+     *
+     * @param {Object} pFormScript
+     * @returns {HTMLDivElement}
+     */
+    const createFormScriptCard = (pFormScript) => {
+
+        const oCard = document.createElement('div');
+        oCard.className = 'script-card';
+
+        /* ── Top Row: Name ── */
+        const oTop = document.createElement('div');
+        oTop.className = 'card-top';
+
+        const oName = document.createElement('div');
+        oName.className = 'card-name';
+
+        if (pFormScript.SCRIPT_URL) {
+
+            const oNameLink = document.createElement('a');
+            oNameLink.href = pFormScript.SCRIPT_URL;
+            oNameLink.target = '_blank';
+            oNameLink.textContent = pFormScript.SCRIPT_NAME;
+            oName.appendChild(oNameLink);
+        } else {
+
+            const oNameText = document.createElement('span');
+            oNameText.className = 'card-name-text';
+            oNameText.textContent = pFormScript.SCRIPT_NAME;
+            oName.appendChild(oNameText);
+        }
+
+        oTop.appendChild(oName);
+        oCard.appendChild(oTop);
+
+        /* ── Meta Row: State Badge + Form ── */
+        const oMeta = document.createElement('div');
+        oMeta.className = 'card-meta';
+
+        appendStateBadge(oCard, oMeta, pFormScript, '');
+
+        const oFormRef = document.createElement('span');
+        oFormRef.className = 'sm-form-ref';
+        oFormRef.title = pFormScript.FORM_NAME;
+        oFormRef.appendChild(document.createTextNode('Form: '));
+
+        if (pFormScript.FORM_URL) {
+
+            const oFormLink = document.createElement('a');
+            oFormLink.href = pFormScript.FORM_URL;
+            oFormLink.target = '_blank';
+            oFormLink.textContent = pFormScript.FORM_NAME;
+            oFormRef.appendChild(oFormLink);
+        } else {
+            oFormRef.appendChild(document.createTextNode(pFormScript.FORM_NAME));
+        }
+
+        oMeta.appendChild(oFormRef);
+        oCard.appendChild(oMeta);
+
+        /* ── Hooks Row: Form Script Functions ── */
+        appendHookTags(oCard, pFormScript, [
+            {key: 'PAGE_INIT_FN', label: 'pageInit'},
+            {key: 'SAVE_RECORD_FN', label: 'saveRecord'},
+            {key: 'FIELD_CHANGED_FN', label: 'fieldChanged'},
+            {key: 'VALIDATE_LINE_FN', label: 'validateLine'}
+        ]);
 
         return oCard;
     };
@@ -716,21 +981,25 @@ const runPopupLogic = async () => {
     };
 
     /**
-     * Renders the workflow section.
+     * Renders a section titled as-is (Workflows, Form Scripts). Stack order does not
+     * apply, so source order is kept unless sorted by name.
      *
      * @param {DocumentFragment} pFragment
-     * @param {Array} pWorkflows
+     * @param {string} pTitle - Section header text
+     * @param {Array} pItems
+     * @param {string} pNameKey - Property used for A-Z / Z-A sorting
+     * @param {Function} pCreateCard - Card factory for one item
      * @param {string} pSortOrder
      */
-    const renderWorkflowSection = (pFragment, pWorkflows, pSortOrder) => {
+    const renderListSection = (pFragment, pTitle, pItems, pNameKey, pCreateCard, pSortOrder) => {
 
-        /* Sort workflows by name if needed */
-        const aSorted = [...pWorkflows];
+        /* Sort by name if needed */
+        const aSorted = [...pItems];
 
         if (pSortOrder === 'asc') {
-            aSorted.sort((pA, pB) => (pA.WORKFLOW_NAME || '').localeCompare(pB.WORKFLOW_NAME || ''));
+            aSorted.sort((pA, pB) => (pA[pNameKey] || '').localeCompare(pB[pNameKey] || ''));
         } else if (pSortOrder === 'desc') {
-            aSorted.sort((pA, pB) => (pB.WORKFLOW_NAME || '').localeCompare(pA.WORKFLOW_NAME || ''));
+            aSorted.sort((pA, pB) => (pB[pNameKey] || '').localeCompare(pA[pNameKey] || ''));
         }
 
         /* Section Header */
@@ -739,7 +1008,7 @@ const runPopupLogic = async () => {
 
         const oHeaderText = document.createElement('span');
         oHeaderText.className = 'section-header-text';
-        oHeaderText.textContent = 'Workflows';
+        oHeaderText.textContent = pTitle;
 
         const oHeaderCount = document.createElement('span');
         oHeaderCount.className = 'section-header-count';
@@ -753,9 +1022,9 @@ const runPopupLogic = async () => {
         const oBody = document.createElement('div');
         oBody.className = 'section-body';
 
-        aSorted.forEach((pWorkflow) => {
+        aSorted.forEach((pItem) => {
 
-            oBody.appendChild(createWorkflowCard(pWorkflow));
+            oBody.appendChild(pCreateCard(pItem));
         });
 
         /* Toggle collapse on header click */
@@ -872,24 +1141,32 @@ const runPopupLogic = async () => {
      *
      * @param {Array} pScriptsData
      * @param {Array} pWorkflowsData
+     * @param {Array} pFormScriptsData
      * @param {string} pScriptError
      * @param {string} pWorkflowError
      */
-    const renderAll = (pScriptsData, pWorkflowsData, pScriptError, pWorkflowError) => {
+    const renderAll = (pScriptsData, pWorkflowsData, pFormScriptsData, pScriptError, pWorkflowError) => {
 
-        /* Filter for Deployed Only */
+        /* Filter for Deployed Only: keep items that run, or may run, on this record */
         const bShowOnlyDeployed = oDeployedToggle?.classList.contains('active');
+        const aRunStates = ['active', 'testing', 'current_form', 'unknown_form'];
 
-        const aFilteredScripts = bShowOnlyDeployed
-            ? pScriptsData.filter(isScriptActive)
-            : pScriptsData;
+        /**
+         * Applies the Deployed filter to a list.
+         *
+         * @param {Array} pItems
+         * @returns {Array}
+         */
+        const filterDeployed = (pItems) => {
 
-        const aFilteredWorkflows = bShowOnlyDeployed
-            ? pWorkflowsData.filter((pWorkflow) => {
-                const sStatus = (pWorkflow.STATUS || '').toLowerCase();
-                return sStatus === 'released';
-            })
-            : pWorkflowsData;
+            return bShowOnlyDeployed
+                ? pItems.filter((pItem) => aRunStates.includes(pItem.STATE))
+                : pItems;
+        };
+
+        const aFilteredScripts = filterDeployed(pScriptsData);
+        const aFilteredWorkflows = filterDeployed(pWorkflowsData || []);
+        const aFilteredFormScripts = filterDeployed(pFormScriptsData || []);
 
         /* Group scripts by type */
         let oGroupedScripts = aFilteredScripts.reduce((pAcc, pScriptObj) => {
@@ -905,9 +1182,14 @@ const runPopupLogic = async () => {
         /* Get all group keys (script types) */
         const aScriptGroupKeys = Object.keys(oGroupedScripts);
 
-        /* Build combined key list: script groups + "Workflows" if present */
+        /* Build combined key list: script groups + "Form Scripts" and "Workflows" if present */
         const aAllKeys = [...aScriptGroupKeys];
-        const bHasWorkflows = aFilteredWorkflows && aFilteredWorkflows.length > 0;
+        const bHasWorkflows = aFilteredWorkflows.length > 0;
+        const bHasFormScripts = aFilteredFormScripts.length > 0;
+
+        if (bHasFormScripts) {
+            aAllKeys.push('Form Scripts');
+        }
 
         if (bHasWorkflows) {
             aAllKeys.push('Workflows');
@@ -924,7 +1206,16 @@ const runPopupLogic = async () => {
 
             if (pKey === 'Workflows') {
                 if (bHasWorkflows) {
-                    renderWorkflowSection(oFragment, aFilteredWorkflows, sSortOrder);
+                    renderListSection(
+                        oFragment, 'Workflows', aFilteredWorkflows, 'WORKFLOW_NAME', createWorkflowCard, sSortOrder
+                    );
+                    bRenderedAnything = true;
+                }
+            } else if (pKey === 'Form Scripts') {
+                if (bHasFormScripts) {
+                    renderListSection(
+                        oFragment, 'Form Scripts', aFilteredFormScripts, 'SCRIPT_NAME', createFormScriptCard, sSortOrder
+                    );
                     bRenderedAnything = true;
                 }
             } else if (oGroupedScripts[pKey]) {
@@ -975,10 +1266,10 @@ const runPopupLogic = async () => {
             return;
         }
 
-        const {SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR} = oLastData;
+        const {SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR} = oLastData;
         oCardsContainer.replaceChildren();
         oMessage.classList.remove('visible');
-        renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
+        renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
     };
 
     /**
@@ -2140,26 +2431,13 @@ const runPopupLogic = async () => {
     });
 
     /* ────────────────────────────────────────────────
-     * Gate: require NetSuite record page for scripts view
+     * Gate: require a NetSuite page for scripts view
+     * (record detection, including create mode, happens in nsmain.js)
      * ──────────────────────────────────────────────── */
 
     if (!oTab || !oTab.url || !oTab.url.includes('netsuite.com')) {
 
         showMessage('Navigate to a NetSuite page to use this extension.', false);
-        return;
-    }
-
-    let bHasRecordId = false;
-
-    try {
-        bHasRecordId = new URL(oTab.url).searchParams.has('id');
-    } catch (pErr) {
-        /* invalid URL, treat as no record */
-    }
-
-    if (!bHasRecordId) {
-
-        showMessage('Open a NetSuite record to view its scripts.', false);
         return;
     }
 
@@ -2178,13 +2456,6 @@ const runPopupLogic = async () => {
 
         const sUrl = `${sOrigin}/app/common/scripting/scriptedrecord.nl?id=${oLastData.RECORD_TYPE.toUpperCase()}`;
         chrome.tabs.create({url: sUrl}).catch(() => {});
-    });
-
-    document.querySelectorAll('.sm-footer a[target="_blank"]').forEach((pLink) => {
-        pLink.addEventListener('click', (pEvent) => {
-            pEvent.preventDefault();
-            chrome.tabs.create({url: pEvent.currentTarget.href}).catch(() => {});
-        });
     });
 
     /* ────────────────────────────────────────────────
@@ -2220,7 +2491,12 @@ const runPopupLogic = async () => {
 
                 if (oResponse) {
 
-                    /* Check for error from nsmain.js */
+                    /* Check for error from nsmain.js; no record on the page is not an error */
+                    if (oResponse.error === 'NO_RECORD') {
+                        showMessage('Open a NetSuite record to view its scripts.', false);
+                        return;
+                    }
+
                     if (oResponse.error) {
                         showMessage(oResponse.message || oResponse.error, true);
                         return;
@@ -2230,31 +2506,43 @@ const runPopupLogic = async () => {
 
                         /* Store in memory for re-renders (sort/toggle changes) */
                         oLastData = oResponse.data;
+                        oLastData.FORM_SCRIPTS_DATA = [];
 
-                        /* Enable Scripted Records button now that we have the record type */
-                        if (oLastData.RECORD_TYPE && oScriptedRecordsBtn) {
-                            oScriptedRecordsBtn.disabled = false;
-                        }
+                        if (oLastData.RECORD_TYPE) {
 
-                        /* Fetch stack order from scripted record page */
-                        if (oLastData.RECORD_TYPE && oLastData.SCRIPTS_DATA?.length) {
+                            /* Enable Scripted Records button now that we have the record type */
+                            if (oScriptedRecordsBtn) {
+                                oScriptedRecordsBtn.disabled = false;
+                            }
 
-                            try {
-                                const oStackMap = await fetchStackOrder(sOrigin, oLastData.RECORD_TYPE);
+                            /*
+                             * Scripted record page fetches run in parallel: stack order only matters
+                             * with deployments, form scripts are listed even without them.
+                             * Both are non-critical -- continue without them on failure.
+                             */
+                            const [oStackResult, oFormsResult] = await Promise.allSettled([
+                                oLastData.SCRIPTS_DATA?.length
+                                    ? fetchStackOrder(sOrigin, oLastData.RECORD_TYPE)
+                                    : null,
+                                fetchFormScripts(sOrigin, oLastData.RECORD_TYPE, oLastData.CUSTOM_FORM_ID || '')
+                            ]);
 
-                                if (oStackMap.size > 0) {
-                                    applyStackOrder(oLastData.SCRIPTS_DATA, oStackMap);
-                                    bStackOrderAvailable = true;
-                                }
-                            } catch (pErr) {
-                                /* Stack order is non-critical -- continue without it */
+                            if (oStackResult.status === 'fulfilled' && oStackResult.value?.size > 0) {
+                                applyStackOrder(oLastData.SCRIPTS_DATA, oStackResult.value);
+                                bStackOrderAvailable = true;
+                            }
+
+                            if (oFormsResult.status === 'fulfilled') {
+                                oLastData.FORM_SCRIPTS_DATA = oFormsResult.value;
                             }
                         }
 
-                        const {SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR} = oLastData;
+                        const {
+                            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR
+                        } = oLastData;
 
                         oCardsContainer.replaceChildren();
-                        renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
+                        renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
                         return;
                     }
                 }

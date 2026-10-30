@@ -1,0 +1,1077 @@
+/**
+ * Popup harness -- renders the real popup.html body, css/main.css and js/popup.js against a
+ * fake `chrome` API and stubbed scriptedrecord.nl responses, then asserts the DOM.
+ *
+ * Query params:
+ *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | deployed-filter
+ *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
+ *
+ * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
+ * Results are printed into the page and exposed as
+ *   window.__HARNESS__ = {done, scenario, fixture, passed, failed, results: [{name, pass, detail}]}
+ *
+ * Test-only file: build.sh packages manifest, popup.html, css, img and js only.
+ */
+
+(() => {
+
+    const SCENARIOS = ['record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'deployed-filter'];
+    const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
+    const FORM_TITLE = 'Runs only on records that use this form';
+    const DEFAULT_GROUP_ORDER = ['User Event', 'Client', 'Form Scripts', 'Mass Update', 'Workflow Action', 'Workflows'];
+    const LEGACY_GROUP_ORDER = [
+        'User Event', 'Client', 'Mass Update', 'Workflow Action', 'Custom GL Lines (Plug-in)', 'Workflows'
+    ];
+    const RUN_STATES = ['active', 'testing', 'current_form', 'unknown_form'];
+    const MIN_CONTRAST = 4.5;
+
+    const oParams = new URLSearchParams(window.location.search);
+    const sScenario = oParams.get('scenario') || 'record';
+    const sFixtureUrl = oParams.get('fixture') || 'tests/browser/fixtures/record.json';
+
+    const oHarness = {done: false, scenario: sScenario, fixture: sFixtureUrl, passed: 0, failed: 0, results: []};
+    window.__HARNESS__ = oHarness;
+
+    const fnNativeFetch = window.fetch.bind(window);
+    const aPageErrors = [];
+    const oLog = {fetches: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: []};
+    const oStore = {};
+    const oState = {response: null, tabUrl: ''};
+
+    window.addEventListener('error', (pEvent) => {
+
+        aPageErrors.push(pEvent.message);
+    });
+
+    window.addEventListener('unhandledrejection', (pEvent) => {
+
+        aPageErrors.push(String(pEvent.reason));
+    });
+
+    /* ────────────────────────────────────────────────
+     * Assertion helpers
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * Records one assertion.
+     *
+     * @param {string} pName
+     * @param {boolean} pPass
+     * @param {string} [pDetail] - Shown on failure
+     */
+    const check = (pName, pPass, pDetail) => {
+
+        oHarness.results.push({name: pName, pass: !!pPass, detail: pPass ? '' : (pDetail || '')});
+
+        if (pPass) {
+            oHarness.passed++;
+        } else {
+            oHarness.failed++;
+        }
+    };
+
+    /**
+     * Records a strict-equality assertion (arrays/objects compared as JSON).
+     *
+     * @param {string} pName
+     * @param {*} pActual
+     * @param {*} pExpected
+     */
+    const checkEqual = (pName, pActual, pExpected) => {
+
+        const sActual = JSON.stringify(pActual);
+        const sExpected = JSON.stringify(pExpected);
+        check(pName, sActual === sExpected, `expected ${sExpected}, got ${sActual}`);
+    };
+
+    /**
+     * Resolves after pMs milliseconds.
+     *
+     * @param {number} pMs
+     * @returns {Promise<void>}
+     */
+    const delay = (pMs) => new Promise((pResolve) => setTimeout(pResolve, pMs));
+
+    /**
+     * Polls until pCondition() is truthy.
+     *
+     * @param {Function} pCondition
+     * @param {number} pTimeoutMs
+     * @param {string} pLabel
+     */
+    const waitFor = async (pCondition, pTimeoutMs, pLabel) => {
+
+        const nStart = performance.now();
+
+        while (!pCondition()) {
+
+            if (performance.now() - nStart > pTimeoutMs) {
+                throw new Error('Timed out waiting for ' + pLabel);
+            }
+
+            await delay(50);
+        }
+    };
+
+    /**
+     * True once popup.js rendered cards or a message.
+     *
+     * @returns {boolean}
+     */
+    const isRendered = () => {
+
+        return !!document.querySelector('#scriptCards .section-header') ||
+            document.getElementById('message').classList.contains('visible');
+    };
+
+    /* ────────────────────────────────────────────────
+     * Oracle: PLAN STATE table
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * Expected badge, tooltip, dimming and dot for a STATE.
+     *
+     * @param {string} pState
+     * @param {string} pStatus
+     * @param {string} pKind - 'script' | 'workflow' | 'form'
+     * @returns {{text: string, look: string, title: string, dimmed: boolean, dot: string}}
+     */
+    const expectedBadge = (pState, pStatus, pKind) => {
+
+        const sStatus = pStatus || '';
+
+        switch (pState) {
+
+            case 'active':
+                return {text: sStatus.toLowerCase(), look: 'active', title: '', dimmed: false, dot: 'green'};
+
+            case 'testing':
+                return {
+                    text: 'testing',
+                    look: 'testing',
+                    title: pKind === 'workflow'
+                        ? 'Testing: initiates only for the workflow owner'
+                        : 'Testing: runs only for the script owner',
+                    dimmed: false,
+                    dot: 'amber'
+                };
+
+            case 'undeployed':
+                return {
+                    text: 'undeployed', look: 'inactive', dimmed: true, dot: 'none',
+                    title: 'The deployment\'s Deployed checkbox is unchecked'
+                };
+
+            case 'script_inactive':
+                return {
+                    text: 'script inactive', look: 'inactive', dimmed: true, dot: 'none',
+                    title: 'The script record is marked Inactive'
+                };
+
+            case 'inactive':
+                return {
+                    text: 'inactive', look: 'inactive', dimmed: true, dot: 'none',
+                    title: 'The workflow is marked Inactive'
+                };
+
+            case 'current_form':
+                return {text: 'current form', look: 'active', title: '', dimmed: false, dot: 'green'};
+
+            case 'other_form':
+                return {text: 'other form', look: 'inactive', title: FORM_TITLE, dimmed: true, dot: 'none'};
+
+            case 'unknown_form':
+                return {text: 'form script', look: 'neutral', title: FORM_TITLE, dimmed: false, dot: 'none'};
+
+            default:
+                return {
+                    text: sStatus.toLowerCase() || 'n/a', look: 'inactive', dimmed: true, dot: 'none',
+                    title: 'Status: ' + (sStatus || 'n/a')
+                };
+        }
+    };
+
+    /**
+     * Expected form-script state for a row's form id.
+     *
+     * @param {string} pFormId
+     * @param {string} pCustomFormId - '' when unknown
+     * @returns {string}
+     */
+    const expectedFormState = (pFormId, pCustomFormId) => {
+
+        if (!pCustomFormId) {
+            return 'unknown_form';
+        }
+
+        return pFormId === pCustomFormId ? 'current_form' : 'other_form';
+    };
+
+    /* ────────────────────────────────────────────────
+     * DOM readers
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * Rendered sections in order.
+     *
+     * @returns {Array<{title: string, count: string, body: HTMLElement}>}
+     */
+    const getSections = () => {
+
+        return [...document.querySelectorAll('#scriptCards .section-header')].map((pHeader) => ({
+            title: pHeader.querySelector('.section-header-text').textContent,
+            count: pHeader.querySelector('.section-header-count').textContent,
+            body: pHeader.nextElementSibling
+        }));
+    };
+
+    /**
+     * Cards of the section with the given header text.
+     *
+     * @param {string} pTitle
+     * @returns {HTMLElement[]}
+     */
+    const getSectionCards = (pTitle) => {
+
+        const oSection = getSections().find((pSection) => pSection.title === pTitle);
+        return oSection ? [...oSection.body.querySelectorAll('.script-card')] : [];
+    };
+
+    /**
+     * Finds a script card by deployment id.
+     *
+     * @param {string} pDeploymentId
+     * @returns {HTMLElement|undefined}
+     */
+    const findScriptCard = (pDeploymentId) => {
+
+        return [...document.querySelectorAll('#scriptCards .script-card')].find((pCard) =>
+            pCard.querySelector('.sm-deploy-id')?.textContent === pDeploymentId
+        );
+    };
+
+    /**
+     * Finds a card by its name in a section.
+     *
+     * @param {string} pSectionTitle
+     * @param {string} pName
+     * @returns {HTMLElement|undefined}
+     */
+    const findNamedCard = (pSectionTitle, pName) => {
+
+        return getSectionCards(pSectionTitle).find((pCard) =>
+            pCard.querySelector('.card-name').textContent.trim() === pName
+        );
+    };
+
+    /**
+     * Reads badge, tooltip, dimming and dot of a card.
+     *
+     * @param {HTMLElement} pCard
+     * @returns {Object}
+     */
+    const readBadge = (pCard) => {
+
+        const aBadges = pCard.querySelectorAll('.sm-badge');
+        const oBadge = aBadges[0];
+        const oDot = pCard.querySelector('.sm-deployed-dot');
+        const aLooks = ['active', 'testing', 'inactive', 'neutral'];
+        let sDot = 'none';
+
+        if (oDot) {
+            sDot = oDot.classList.contains('testing') ? 'amber' : 'green';
+        }
+
+        return {
+            badges: aBadges.length,
+            text: oBadge ? oBadge.textContent : '',
+            look: oBadge ? aLooks.filter((pLook) => oBadge.classList.contains(pLook)).join(' ') : '',
+            title: oBadge ? (oBadge.getAttribute('title') || '') : '',
+            dimmed: pCard.classList.contains('inactive'),
+            dot: sDot
+        };
+    };
+
+    /**
+     * Asserts one card against the STATE table.
+     *
+     * @param {string} pLabel
+     * @param {HTMLElement} pCard
+     * @param {Object} pExpected - expectedBadge() result
+     */
+    const checkBadge = (pLabel, pCard, pExpected) => {
+
+        const oActual = readBadge(pCard);
+        const aDiffs = [];
+
+        if (oActual.badges !== 1) {
+            aDiffs.push(`badges=${oActual.badges} (want 1)`);
+        }
+
+        ['text', 'look', 'title', 'dimmed', 'dot'].forEach((pKey) => {
+
+            if (oActual[pKey] !== pExpected[pKey]) {
+                aDiffs.push(`${pKey}=${JSON.stringify(oActual[pKey])} (want ${JSON.stringify(pExpected[pKey])})`);
+            }
+        });
+
+        const sDimmed = pExpected.dimmed ? 'dimmed' : 'not dimmed';
+
+        check(
+            `${pLabel}: badge "${pExpected.text}", tooltip, ${sDimmed}, dot ${pExpected.dot}`,
+            aDiffs.length === 0,
+            aDiffs.join('; ')
+        );
+    };
+
+    /* ────────────────────────────────────────────────
+     * Color contrast (WCAG relative luminance)
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * Contrast ratio between two computed CSS colors.
+     *
+     * @param {string} pColorA - e.g. 'rgb(133, 100, 4)'
+     * @param {string} pColorB
+     * @returns {number}
+     */
+    const contrastRatio = (pColorA, pColorB) => {
+
+        const aLuminance = [pColorA, pColorB].map((pColor) => {
+
+            const [nR, nG, nB] = pColor.match(/[\d.]+/g).slice(0, 3).map((pPart) => {
+
+                /* sRGB channel to linear light */
+                const nChannel = Number(pPart) / 255;
+                return nChannel <= 0.03928 ? nChannel / 12.92 : ((nChannel + 0.055) / 1.055) ** 2.4;
+            });
+
+            return 0.2126 * nR + 0.7152 * nG + 0.0722 * nB;
+        }).sort((pA, pB) => pB - pA);
+
+        return (aLuminance[0] + 0.05) / (aLuminance[1] + 0.05);
+    };
+
+    /* ────────────────────────────────────────────────
+     * Fakes
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * Installs the fake extension API used by popup.js.
+     *
+     * @param {Object} pManifest
+     */
+    const installChrome = (pManifest) => {
+
+        const oFakeChrome = {
+            runtime: {
+                lastError: undefined,
+                getManifest: () => pManifest,
+                sendMessage: async (pMessage) => {
+
+                    oLog.runtimeMessages.push(pMessage.type);
+                    return {success: true};
+                }
+            },
+            storage: {
+                local: {
+                    get: async (pKeys) => {
+
+                        const aKeys = pKeys == null ? Object.keys(oStore) : [].concat(pKeys);
+                        return Object.fromEntries(
+                            aKeys.filter((pKey) => pKey in oStore).map((pKey) => [pKey, structuredClone(oStore[pKey])])
+                        );
+                    },
+                    set: async (pItems) => {
+
+                        oLog.storageSets.push(structuredClone(pItems));
+                        Object.assign(oStore, structuredClone(pItems));
+                    },
+                    remove: async (pKeys) => {
+
+                        [].concat(pKeys).forEach((pKey) => {
+
+                            delete oStore[pKey];
+                        });
+                    }
+                }
+            },
+            tabs: {
+                query: async () => [{id: 1, url: oState.tabUrl}],
+                sendMessage: (pTabId, pMessage, pCallback) => {
+
+                    const oReply = pMessage.type === 'GET_SCRIPTS_DATA' ? structuredClone(oState.response) : null;
+
+                    setTimeout(() => {
+
+                        if (pCallback) {
+                            pCallback(oReply);
+                        }
+                    }, 0);
+                },
+                create: async (pOptions) => {
+
+                    oLog.tabsCreated.push(pOptions.url);
+                    return {};
+                }
+            }
+        };
+
+        try {
+            Object.defineProperty(window, 'chrome', {value: oFakeChrome, configurable: true, writable: true});
+        } catch (pErr) {
+            window.chrome = oFakeChrome;
+        }
+
+        if (window.chrome !== oFakeChrome) {
+            throw new Error('Could not install the fake chrome API');
+        }
+    };
+
+    /**
+     * Routes scriptedrecord.nl requests (stack order page and forms fragment) to fixture HTML.
+     *
+     * @param {string} pFormsHtml
+     * @param {string} pStackHtml
+     */
+    const installFetch = (pFormsHtml, pStackHtml) => {
+
+        let nInFlight = 0;
+
+        window.fetch = async (pInput, pInit) => {
+
+            const sUrl = typeof pInput === 'string' ? pInput : String(pInput.url || pInput);
+
+            if (!sUrl.includes('/app/common/scripting/scriptedrecord.nl')) {
+                return fnNativeFetch(pInput, pInit);
+            }
+
+            const bForms = new URL(sUrl).searchParams.get('machine') === 'forms';
+            oLog.fetches.push({url: sUrl, kind: bForms ? 'forms' : 'stack', credentials: pInit?.credentials});
+
+            nInFlight++;
+            oLog.maxInFlight = Math.max(oLog.maxInFlight, nInFlight);
+            await delay(40);
+            nInFlight--;
+
+            return new Response(bForms ? pFormsHtml : pStackHtml, {
+                status: 200,
+                headers: {'Content-Type': 'text/html'}
+            });
+        };
+    };
+
+    /**
+     * Imports the real popup.html body into this page.
+     *
+     * @param {string} pPopupHtml
+     */
+    const mountPopup = (pPopupHtml) => {
+
+        const oPopupDoc = new DOMParser().parseFromString(pPopupHtml, 'text/html');
+
+        Array.from(oPopupDoc.body.childNodes).forEach((pNode) => {
+
+            document.body.appendChild(document.importNode(pNode, true));
+        });
+    };
+
+    /**
+     * Loads the real js/popup.js and fires DOMContentLoaded for it.
+     */
+    const startPopup = async () => {
+
+        await new Promise((pResolve, pReject) => {
+
+            const oScript = document.createElement('script');
+            oScript.src = 'js/popup.js';
+            oScript.onload = pResolve;
+            oScript.onerror = () => pReject(new Error('js/popup.js failed to load'));
+            document.head.appendChild(oScript);
+        });
+
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        await waitFor(isRendered, 10000, 'popup render');
+        await delay(100);
+    };
+
+    /* ────────────────────────────────────────────────
+     * Shared checks
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * Checks every payload item and expected form script: present with the right badge, or
+     * absent when the Deployed filter hides it.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload - Payload the popup received
+     * @param {boolean} pDeployedOnly
+     */
+    const checkItems = (pFixture, pPayload, pDeployedOnly) => {
+
+        const sSuffix = pDeployedOnly ? ' [Deployed filter]' : '';
+
+        /**
+         * True when the item should be rendered.
+         *
+         * @param {string} pState
+         * @returns {boolean}
+         */
+        const isShown = (pState) => !pDeployedOnly || RUN_STATES.includes(pState);
+
+        pPayload.SCRIPTS_DATA.forEach((pScript) => {
+
+            const sLabel = `Script ${pScript.DEPLOYMENT_ID} [${pScript.STATE}]${sSuffix}`;
+            const oCard = findScriptCard(pScript.DEPLOYMENT_ID);
+
+            if (!isShown(pScript.STATE)) {
+                check(`${sLabel}: hidden`, !oCard, 'card is rendered');
+                return;
+            }
+
+            if (!oCard) {
+                check(`${sLabel}: rendered`, false, 'card not found');
+                return;
+            }
+
+            checkBadge(sLabel, oCard, expectedBadge(pScript.STATE, pScript.STATUS, 'script'));
+
+            const oLink = oCard.querySelector('.sm-deploy-id');
+            const sFont = getComputedStyle(oLink).fontFamily.toLowerCase();
+            check(
+                `${sLabel}: deployment id links to the deployment record (new tab, full id in title, monospace)`,
+                oLink.tagName === 'A' && oLink.href === pScript.DEPLOYMENT_URL && oLink.target === '_blank' &&
+                    oLink.title === pScript.DEPLOYMENT_ID && sFont.includes('mono'),
+                `href=${oLink.href} target=${oLink.target} title=${oLink.title} font=${sFont}`
+            );
+        });
+
+        pPayload.WORKFLOWS_DATA.forEach((pWorkflow) => {
+
+            const sLabel = `Workflow "${pWorkflow.WORKFLOW_NAME}" [${pWorkflow.STATE}]${sSuffix}`;
+            const oCard = findNamedCard('Workflows', pWorkflow.WORKFLOW_NAME);
+
+            if (!isShown(pWorkflow.STATE)) {
+                check(`${sLabel}: hidden`, !oCard, 'card is rendered');
+                return;
+            }
+
+            if (!oCard) {
+                check(`${sLabel}: rendered`, false, 'card not found');
+                return;
+            }
+
+            checkBadge(sLabel, oCard, expectedBadge(pWorkflow.STATE, pWorkflow.STATUS, 'workflow'));
+        });
+
+        pFixture.expect.formScripts.forEach((pForm) => {
+
+            const sState = expectedFormState(pForm.formId, pPayload.CUSTOM_FORM_ID || '');
+            const sLabel = `Form script "${pForm.scriptName}" [${sState}]${sSuffix}`;
+            const oCard = findNamedCard('Form Scripts', pForm.scriptName);
+
+            if (!isShown(sState)) {
+                check(`${sLabel}: hidden`, !oCard, 'card is rendered');
+                return;
+            }
+
+            if (!oCard) {
+                check(`${sLabel}: rendered`, false, 'card not found');
+                return;
+            }
+
+            checkBadge(sLabel, oCard, expectedBadge(sState, '', 'form'));
+
+            const oNameLink = oCard.querySelector('.card-name a');
+
+            if (pForm.scriptUrl) {
+                check(
+                    `${sLabel}: script link resolved to the NetSuite origin`,
+                    !!oNameLink && oNameLink.href === pForm.scriptUrl && oNameLink.target === '_blank' &&
+                        new URL(oNameLink.href).origin === pFixture.origin,
+                    `href=${oNameLink?.href}`
+                );
+            } else {
+                check(
+                    `${sLabel}: no script link when the Script cell has no anchor`,
+                    !oNameLink && oCard.querySelector('.card-name-text')?.textContent === pForm.scriptName,
+                    `link=${oNameLink?.href}`
+                );
+            }
+
+            const oFormRef = oCard.querySelector('.card-meta .sm-form-ref');
+            const oFormLink = oFormRef?.querySelector('a');
+            check(
+                `${sLabel}: "Form: ${pForm.formName}" links to the form, resolved to the NetSuite origin`,
+                !!oFormLink && oFormRef.textContent === `Form: ${pForm.formName}` && oFormLink.href === pForm.formUrl &&
+                    oFormLink.target === '_blank' && new URL(oFormLink.href).origin === pFixture.origin,
+                `text=${oFormRef?.textContent} href=${oFormLink?.href}`
+            );
+
+            checkEqual(
+                `${sLabel}: hook tags`,
+                [...oCard.querySelectorAll('.card-hooks .sm-hook-tag')].map((pTag) => pTag.textContent),
+                pForm.hooks
+            );
+        });
+
+        pFixture.expect.formsWithoutScript.forEach((pFormName) => {
+
+            const bListed = getSectionCards('Form Scripts').some((pCard) =>
+                pCard.querySelector('.sm-form-ref')?.textContent === `Form: ${pFormName}`
+            );
+            check(`Form "${pFormName}" without a script is not listed`, !bListed, 'listed');
+        });
+
+        check(
+            'No "Custom GL Lines (Plug-in)" group',
+            !getSections().some((pSection) => pSection.title.includes('Custom GL')),
+            getSections().map((pSection) => pSection.title).join(', ')
+        );
+    };
+
+    /**
+     * Checks the scriptedrecord.nl requests made by the popup.
+     *
+     * @param {Object} pPayload
+     * @param {boolean} pExpectStack
+     */
+    const checkFetches = (pPayload, pExpectStack) => {
+
+        const aForms = oLog.fetches.filter((pFetch) => pFetch.kind === 'forms');
+        const aStack = oLog.fetches.filter((pFetch) => pFetch.kind === 'stack');
+        const oFormsUrl = aForms[0] ? new URL(aForms[0].url) : null;
+
+        check(
+            'Forms fragment fetched once (r=T, id=<RECORD_TYPE>, machine=forms, credentials include)',
+            aForms.length === 1 && oFormsUrl.searchParams.get('r') === 'T' &&
+                oFormsUrl.searchParams.get('id') === pPayload.RECORD_TYPE.toUpperCase() &&
+                oFormsUrl.searchParams.get('machine') === 'forms' && aForms[0].credentials === 'include',
+            JSON.stringify(aForms)
+        );
+
+        if (pExpectStack) {
+            check(
+                'Stack order page fetched once (credentials include)',
+                aStack.length === 1 && aStack[0].credentials === 'include',
+                JSON.stringify(aStack)
+            );
+            check(
+                'Stack order and forms fetches run in parallel',
+                oLog.maxInFlight >= 2,
+                `max in flight ${oLog.maxInFlight}`
+            );
+        } else {
+            check('Stack order page not fetched without deployments', aStack.length === 0, JSON.stringify(aStack));
+        }
+    };
+
+    /**
+     * Expected section header texts for the default group order.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload
+     * @returns {string[]}
+     */
+    const expectedSectionTitles = (pFixture, pPayload) => {
+
+        const aGroups = [...new Set(pPayload.SCRIPTS_DATA.map((pScript) => pScript.SCRIPT_TYPE))];
+
+        if (pFixture.expect.formScripts.length > 0) {
+            aGroups.push('Form Scripts');
+        }
+
+        if (pPayload.WORKFLOWS_DATA.length > 0) {
+            aGroups.push('Workflows');
+        }
+
+        const aKnown = DEFAULT_GROUP_ORDER.filter((pGroup) => aGroups.includes(pGroup));
+        const aUnknown = aGroups
+            .filter((pGroup) => !DEFAULT_GROUP_ORDER.includes(pGroup))
+            .sort((pA, pB) => pA.localeCompare(pB));
+
+        return [...aKnown, ...aUnknown].map((pGroup) => {
+
+            return (pGroup === 'Form Scripts' || pGroup === 'Workflows') ? pGroup : pGroup + ' Scripts';
+        });
+    };
+
+    /**
+     * Opens the settings drawer and returns the group labels.
+     *
+     * @returns {string[]}
+     */
+    const readDrawerGroups = () => {
+
+        document.getElementById('settingsBtn').click();
+        const aLabels = [...document.querySelectorAll('#groupOrderList .sm-order-label')]
+            .map((pLabel) => pLabel.textContent);
+        document.getElementById('settingsBtn').click();
+        return aLabels;
+    };
+
+    /* ────────────────────────────────────────────────
+     * Scenarios
+     * ──────────────────────────────────────────────── */
+
+    /**
+     * record: every state, current/other form, stack order, links, drawer, dark mode.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload
+     */
+    const runRecordChecks = (pFixture, pPayload) => {
+
+        checkFetches(pPayload, true);
+        checkItems(pFixture, pPayload, false);
+
+        checkEqual(
+            'Groups in default order ("Form Scripts" after Client, no " Scripts" suffix on Form Scripts/Workflows)',
+            getSections().map((pSection) => pSection.title),
+            expectedSectionTitles(pFixture, pPayload)
+        );
+
+        checkEqual(
+            'Form Scripts count excludes forms without a script',
+            getSections().find((pSection) => pSection.title === 'Form Scripts')?.count,
+            `(${pFixture.expect.formScripts.length})`
+        );
+
+        checkEqual(
+            'Form Scripts keep source order under Stack Order sort',
+            getSectionCards('Form Scripts').map((pCard) => pCard.querySelector('.card-name').textContent.trim()),
+            pFixture.expect.formScripts.map((pForm) => pForm.scriptName)
+        );
+
+        Object.entries(pFixture.expect.stackOrder).forEach(([pGroup, pIds]) => {
+
+            checkEqual(
+                `Stack order applied to ${pGroup} Scripts`,
+                getSectionCards(pGroup + ' Scripts').map((pCard) => pCard.querySelector('.sm-deploy-id').textContent),
+                pIds
+            );
+        });
+
+        const oLongLink = findScriptCard(pFixture.expect.truncatedDeploymentId)?.querySelector('.sm-deploy-id');
+        check(
+            'Long deployment id truncates with ellipsis',
+            !!oLongLink && getComputedStyle(oLongLink).textOverflow === 'ellipsis' &&
+                oLongLink.scrollWidth > oLongLink.clientWidth,
+            oLongLink ? `scrollWidth=${oLongLink.scrollWidth} clientWidth=${oLongLink.clientWidth}` : 'not found'
+        );
+
+        const aDrawer = readDrawerGroups();
+        checkEqual('Settings drawer shows the default group order without Custom GL', aDrawer, DEFAULT_GROUP_ORDER);
+
+        check('Scripted Records button enabled', !document.getElementById('scriptedRecordsBtn').disabled, 'disabled');
+
+        const sFooter = document.getElementById('footerVersion').textContent;
+        check(
+            'Footer shows manifest version, no sponsor block',
+            sFooter.endsWith('v' + chrome.runtime.getManifest().version) &&
+                !document.querySelector('.sm-footer-sponsor, .sm-sponsor-text, .sm-sponsor-logo'),
+            sFooter
+        );
+
+        /* Amber badge/dot readable in both themes */
+        const oTestingCard = [...document.querySelectorAll('#scriptCards .script-card')]
+            .find((pCard) => pCard.querySelector('.sm-badge.testing'));
+        const oGreenDot = document.querySelector('#scriptCards .sm-deployed-dot:not(.testing)');
+
+        if (!oTestingCard || !oGreenDot) {
+            check('Testing badge and green dot present for contrast check', false, 'missing');
+            return;
+        }
+
+        ['light', 'dark'].forEach((pTheme) => {
+
+            if (pTheme === 'dark') {
+                document.getElementById('darkToggle').click();
+            }
+
+            const oBadgeStyle = getComputedStyle(oTestingCard.querySelector('.sm-badge'));
+            const sAmberDot = getComputedStyle(oTestingCard.querySelector('.sm-deployed-dot')).backgroundColor;
+            const sGreenDot = getComputedStyle(oGreenDot).backgroundColor;
+            const sCardBg = getComputedStyle(oTestingCard).backgroundColor;
+            const nBadgeContrast = contrastRatio(oBadgeStyle.color, oBadgeStyle.backgroundColor);
+            const nDotContrast = contrastRatio(sAmberDot, sCardBg);
+
+            check(
+                `Testing badge contrast >= ${MIN_CONTRAST} (${pTheme})`,
+                nBadgeContrast >= MIN_CONTRAST,
+                `${nBadgeContrast.toFixed(2)} (${oBadgeStyle.color} on ${oBadgeStyle.backgroundColor})`
+            );
+            check(
+                `Amber dot distinct from green dot and visible on the card (${pTheme})`,
+                sAmberDot !== sGreenDot && nDotContrast >= 3,
+                `amber=${sAmberDot} green=${sGreenDot} contrast=${nDotContrast.toFixed(2)}`
+            );
+        });
+
+        document.getElementById('darkToggle').click();
+    };
+
+    /**
+     * deployed-filter: Deployed pill on (stored), legacy stored group order, then unknown form.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload
+     */
+    const runDeployedFilterChecks = async (pFixture, pPayload) => {
+
+        check(
+            'Deployed pill restored as active',
+            document.getElementById('deployedToggle').classList.contains('active'),
+            'not active'
+        );
+
+        checkItems(pFixture, pPayload, true);
+
+        const oInactiveWorkflow = pPayload.WORKFLOWS_DATA.find((pWorkflow) => pWorkflow.STATE === 'inactive');
+        check(
+            'Inactive workflow with Released status hidden by the Deployed filter',
+            !!oInactiveWorkflow && oInactiveWorkflow.STATUS === 'Released' &&
+                !findNamedCard('Workflows', oInactiveWorkflow.WORKFLOW_NAME),
+            'still rendered or not in fixture'
+        );
+
+        const aTesting = [
+            ...pPayload.SCRIPTS_DATA.filter((pScript) => pScript.STATE === 'testing')
+                .map((pScript) => findScriptCard(pScript.DEPLOYMENT_ID)),
+            ...pPayload.WORKFLOWS_DATA.filter((pWorkflow) => pWorkflow.STATE === 'testing')
+                .map((pWorkflow) => findNamedCard('Workflows', pWorkflow.WORKFLOW_NAME))
+        ];
+        check(
+            'Testing scripts and workflows stay visible with the Deployed filter',
+            aTesting.length >= 2 && aTesting.every((pCard) => !!pCard),
+            `${aTesting.filter((pCard) => !!pCard).length}/${aTesting.length} visible`
+        );
+
+        const oFirstSet = oLog.storageSets.find((pItems) => 'groupOrder' in pItems);
+        check(
+            'Stored group order: "Custom GL Lines (Plug-in)" stripped and persisted on load',
+            !!oFirstSet && !oFirstSet.groupOrder.includes('Custom GL Lines (Plug-in)'),
+            JSON.stringify(oFirstSet)
+        );
+
+        const aStored = oStore.groupOrder || [];
+        const nFormsIdx = aStored.indexOf('Form Scripts');
+        check(
+            'Stored group order gains "Form Scripts" before Workflows',
+            !aStored.includes('Custom GL Lines (Plug-in)') && nFormsIdx !== -1 &&
+                nFormsIdx < aStored.indexOf('Workflows'),
+            JSON.stringify(aStored)
+        );
+
+        check(
+            'Settings drawer has no "Custom GL Lines (Plug-in)"',
+            !readDrawerGroups().includes('Custom GL Lines (Plug-in)'),
+            'present'
+        );
+
+        /* Phase 2: unknown form -- form scripts may run, so the filter keeps them */
+        oState.response.data.CUSTOM_FORM_ID = '';
+        document.getElementById('refreshBtn').click();
+        await waitFor(isRendered, 10000, 'refresh render');
+        await delay(100);
+
+        checkItems(pFixture, oState.response.data, true);
+    };
+
+    /**
+     * Runs the selected scenario.
+     */
+    const run = async () => {
+
+        if (!SCENARIOS.includes(sScenario)) {
+            throw new Error(`Unknown scenario "${sScenario}". Use one of: ${SCENARIOS.join(', ')}`);
+        }
+
+        if (document.readyState === 'loading') {
+            await new Promise((pResolve) => document.addEventListener('DOMContentLoaded', pResolve, {once: true}));
+        }
+
+        const oFixtureUrl = new URL(sFixtureUrl, document.baseURI);
+        const oFixture = await (await fnNativeFetch(oFixtureUrl)).json();
+
+        /**
+         * Fetches a text resource or throws.
+         *
+         * @param {URL|string} pUrl
+         * @returns {Promise<string>}
+         */
+        const fetchText = async (pUrl) => {
+
+            const oResponse = await fnNativeFetch(pUrl);
+
+            if (!oResponse.ok) {
+                throw new Error(`${pUrl}: HTTP ${oResponse.status}`);
+            }
+
+            return oResponse.text();
+        };
+
+        const [sFormsHtml, sStackHtml, sPopupHtml, sManifest] = await Promise.all([
+            fetchText(new URL(oFixture.formsHtml, oFixtureUrl)),
+            fetchText(new URL(oFixture.stackHtml, oFixtureUrl)),
+            fetchText('popup.html'),
+            fetchText('manifest.json')
+        ]);
+
+        const oPayload = structuredClone(oFixture.payload);
+        let sTabPath = oFixture.recordPath;
+        oState.response = {type: 'SCRIPTS_DATA', error: null, data: oPayload};
+
+        if (sScenario === 'unknown-form') {
+            oPayload.CUSTOM_FORM_ID = '';
+        } else if (sScenario === 'forms-only') {
+            oPayload.SCRIPTS_DATA = [];
+            oPayload.WORKFLOWS_DATA = [];
+        } else if (sScenario === 'create-mode') {
+            sTabPath = oFixture.createPath;
+        } else if (sScenario === 'no-record') {
+            sTabPath = oFixture.noRecordPath;
+            oState.response = {
+                type: 'SCRIPTS_DATA',
+                error: 'NO_RECORD',
+                message: 'Unable to detect the record type on this page.'
+            };
+        } else if (sScenario === 'deployed-filter') {
+            oStore.deployedOnly = true;
+            oStore.groupOrder = [...LEGACY_GROUP_ORDER];
+        }
+
+        oState.tabUrl = oFixture.origin + sTabPath;
+
+        installChrome(JSON.parse(sManifest));
+        installFetch(sFormsHtml, sStackHtml);
+        mountPopup(sPopupHtml);
+        await startPopup();
+
+        const oMessage = document.getElementById('message');
+        const oCards = document.getElementById('scriptCards');
+
+        if (sScenario === 'no-record') {
+
+            check(
+                'No record: friendly message shown without the error class',
+                oMessage.classList.contains('visible') && oMessage.textContent === NO_RECORD_TEXT &&
+                    !oMessage.classList.contains('error'),
+                `text="${oMessage.textContent}" class="${oMessage.className}"`
+            );
+            check('No record: no cards rendered', oCards.children.length === 0, 'cards rendered');
+            check('No record: scriptedrecord.nl not fetched', oLog.fetches.length === 0, JSON.stringify(oLog.fetches));
+            check(
+                'No record: Scripted Records button stays disabled',
+                document.getElementById('scriptedRecordsBtn').disabled,
+                'enabled'
+            );
+        } else {
+
+            check(
+                'Message area hidden when data renders',
+                !oMessage.classList.contains('visible'),
+                oMessage.textContent
+            );
+
+            if (sScenario === 'record') {
+                runRecordChecks(oFixture, oPayload);
+            } else if (sScenario === 'unknown-form') {
+                checkItems(oFixture, oPayload, false);
+            } else if (sScenario === 'forms-only') {
+                checkFetches(oPayload, false);
+                checkEqual(
+                    'Forms only: the Form Scripts group is the only group',
+                    getSections().map((pSection) => pSection.title),
+                    ['Form Scripts']
+                );
+                checkItems(oFixture, oPayload, false);
+            } else if (sScenario === 'create-mode') {
+                const nScriptCards = oCards.querySelectorAll('.sm-deploy-id').length;
+
+                check(
+                    'Create mode: tab URL has no id parameter',
+                    !new URL(oState.tabUrl).searchParams.has('id'),
+                    oState.tabUrl
+                );
+                check(
+                    'Create mode: injection requested',
+                    oLog.runtimeMessages.includes('INJECT_AND_GET_DATA'),
+                    oLog.runtimeMessages.join(',')
+                );
+                check(
+                    'Create mode: scripts listed',
+                    nScriptCards === oPayload.SCRIPTS_DATA.length,
+                    `${nScriptCards} script cards`
+                );
+                checkItems(oFixture, oPayload, false);
+            } else if (sScenario === 'deployed-filter') {
+                await runDeployedFilterChecks(oFixture, oPayload);
+            }
+        }
+
+        check('No uncaught page errors', aPageErrors.length === 0, aPageErrors.join(' | '));
+    };
+
+    /**
+     * Prints the results into the page and the console.
+     */
+    const renderResults = () => {
+
+        const oPanel = document.createElement('section');
+        oPanel.id = 'harness-results';
+
+        const oTitle = document.createElement('h1');
+        oTitle.className = oHarness.failed ? 'fail' : 'pass';
+        oTitle.textContent = `${oHarness.failed ? 'FAIL' : 'PASS'} - scenario "${sScenario}": ` +
+            `${oHarness.passed} passed, ${oHarness.failed} failed`;
+        oPanel.appendChild(oTitle);
+
+        const oNav = document.createElement('nav');
+
+        SCENARIOS.forEach((pScenario) => {
+
+            const oParamsCopy = new URLSearchParams(window.location.search);
+            oParamsCopy.set('scenario', pScenario);
+
+            const oLink = document.createElement('a');
+            oLink.href = '?' + oParamsCopy.toString();
+            oLink.textContent = pScenario;
+            oNav.appendChild(oLink);
+        });
+
+        oPanel.appendChild(oNav);
+
+        const oList = document.createElement('ol');
+
+        oHarness.results.forEach((pResult) => {
+
+            const oItem = document.createElement('li');
+            oItem.className = pResult.pass ? 'pass' : 'fail';
+            oItem.textContent = `${pResult.pass ? 'PASS' : 'FAIL'} ${pResult.name}` +
+                (pResult.pass ? '' : ` -- ${pResult.detail}`);
+            oList.appendChild(oItem);
+        });
+
+        oPanel.appendChild(oList);
+        document.documentElement.appendChild(oPanel);
+        const sVerdict = oHarness.failed ? 'FAIL' : 'PASS';
+        document.title = `${sVerdict} ${sScenario} (${oHarness.passed}/${oHarness.results.length})`;
+
+        console.log('[harness]', JSON.stringify({
+            scenario: sScenario,
+            passed: oHarness.passed,
+            failed: oHarness.failed,
+            failures: oHarness.results.filter((pResult) => !pResult.pass)
+        }));
+    };
+
+    run().catch((pErr) => {
+
+        check('Harness run', false, pErr && pErr.stack ? pErr.stack : String(pErr));
+    }).finally(() => {
+
+        oHarness.done = true;
+        renderResults();
+    });
+})();

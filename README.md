@@ -204,9 +204,20 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 
 - Icons and store images co-authored with **Gemini NanoBanana Pro**
 - Code co-authored with **Claude Code**
-- Sponsored by **[SuiteMigration](https://suitemigration.com/netsuite-extension-alien/?utm_source=alien_technology&utm_medium=banner&utm_campaign=alien_extensions&utm_content=ns-scripts-manager)**
 
 ## Changelog
+
+### v1.0.6 - 2026-10-29
+
+- One state badge per card with a reason tooltip: released, testing (amber), undeployed, script inactive, or the raw status when not released
+- Deployments with the Deployed checkbox unchecked are now shown as undeployed instead of active
+- Inactive workflows are shown as inactive and hidden by the Deployed filter; workflows in Testing stay visible with it
+- Script cards show the deployment script id, linking to the deployment record
+- Works on records in create mode (no `id` in the URL); NetSuite pages without a record show a friendly message
+- New Form Scripts group lists form-level client scripts from the record's custom forms, marking the current form
+- Scheduler Check now reports undeployed and inactive-script deployments on the SuiteScript 2.x path
+- Removed the Custom GL Lines (Plug-in) group, which could never populate
+- Removed the sponsor footer
 
 ### v1.0.5 - 2026-03-12
 

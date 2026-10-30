@@ -25,6 +25,8 @@
     --sm-badge-active-bg: #d4edda;
     --sm-badge-inactive: #666;
     --sm-badge-inactive-bg: #f0f2f5;
+    --sm-badge-testing: #856404;
+    --sm-badge-testing-bg: #fff3cd;
     --sm-error: #d32f2f;
     --sm-error-bg: #ffeaea;
     --sm-spinner-dot: #24385B;
@@ -58,6 +60,8 @@ body.theme-dark {
     --sm-badge-active-bg: #1b5e20;
     --sm-badge-inactive: #999;
     --sm-badge-inactive-bg: #2a2a4a;
+    --sm-badge-testing: #ffc107;
+    --sm-badge-testing-bg: #3d3200;
     --sm-error: #ef5350;
     --sm-error-bg: #2e1a1a;
     --sm-spinner-dot: #64b5f6;
@@ -482,7 +486,8 @@ a:hover {
     min-width: 0;
 }
 
-.card-name a {
+.card-name a,
+.card-name-text {
     font-size: 13px;
     font-weight: 500;
     word-break: break-word;
@@ -561,9 +566,15 @@ a:hover {
     background: var(--sm-badge-active-bg);
 }
 
-.sm-badge.inactive {
+.sm-badge.inactive,
+.sm-badge.neutral {
     color: var(--sm-badge-inactive);
     background: var(--sm-badge-inactive-bg);
+}
+
+.sm-badge.testing {
+    color: var(--sm-badge-testing);
+    background: var(--sm-badge-testing-bg);
 }
 
 .sm-deployed-dot {
@@ -572,6 +583,25 @@ a:hover {
     border-radius: 50%;
     background: var(--sm-badge-active);
     flex-shrink: 0;
+}
+
+.sm-deployed-dot.testing {
+    background: var(--sm-badge-testing);
+}
+
+/* Deployment script id and form reference: truncate, full text in title */
+.sm-deploy-id,
+.sm-form-ref {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--sm-text-muted);
+}
+
+.sm-deploy-id {
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
 /* ── Info Tooltip ── */
@@ -631,31 +661,6 @@ a:hover {
     align-items: center;
     justify-content: center;
     flex-wrap: wrap;
-}
-
-.sm-footer-sponsor {
-    gap: 5px;
-    font-size: 11px;
-    color: var(--sm-text-muted);
-    margin-top: 2px;
-}
-
-.sm-sponsor-logo {
-    height: 16px;
-    vertical-align: middle;
-}
-
-.sm-sponsor-text {
-    display: block;
-    text-align: center;
-    font-size: 10px;
-    color: var(--sm-text-muted);
-    padding: 0 8px;
-}
-
-.sm-sponsor-text a {
-    color: var(--sm-text-muted);
-    text-decoration: underline;
 }
 
 /* ── Resize Handle ── */
@@ -841,7 +846,8 @@ body.sm-compact .script-card {
     margin: 2px 0;
 }
 
-body.sm-compact .card-name a {
+body.sm-compact .card-name a,
+body.sm-compact .card-name-text {
     font-size: 11px;
 }
 

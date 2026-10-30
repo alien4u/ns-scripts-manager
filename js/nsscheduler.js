@@ -233,9 +233,9 @@
                 return true;
             }
 
-            if (pResult.getValue({name: 'isinactive', join: 'script'}) === 'T') {
+            if (toBoolean(pResult.getValue({name: 'isinactive', join: 'script'}))) {
                 pStatusMap[sOrigId] = 'INACTIVE_SCRIPT';
-            } else if (pResult.getValue('isdeployed') === 'F') {
+            } else if (!toBoolean(pResult.getValue('isdeployed'))) {
                 pStatusMap[sOrigId] = 'UNDEPLOYED';
             } else if (pStatusMap[sOrigId] !== 'SCHEDULED') {
                 pStatusMap[sOrigId] = pResult.getValue('status');
@@ -270,9 +270,9 @@
                         ]
                     }).run().each((pResult) => {
 
-                        if (pResult.getValue({name: 'isinactive', join: 'script'}) === 'T') {
+                        if (toBoolean(pResult.getValue({name: 'isinactive', join: 'script'}))) {
                             oStatusMap[pResult.id] = 'INACTIVE_SCRIPT';
-                        } else if (pResult.getValue('isdeployed') === 'F') {
+                        } else if (!toBoolean(pResult.getValue('isdeployed'))) {
                             oStatusMap[pResult.id] = 'UNDEPLOYED';
                         } else {
                             oStatusMap[pResult.id] = pResult.getValue('status');
@@ -344,9 +344,9 @@
                     return;
                 }
 
-                if (pResult.getValue('isinactive', 'script') === 'T') {
+                if (toBoolean(pResult.getValue('isinactive', 'script'))) {
                     pStatusMap[sOrigId] = 'INACTIVE_SCRIPT';
-                } else if (pResult.getValue('isdeployed') === 'F') {
+                } else if (!toBoolean(pResult.getValue('isdeployed'))) {
                     pStatusMap[sOrigId] = 'UNDEPLOYED';
                 } else if (pStatusMap[sOrigId] !== 'SCHEDULED') {
                     pStatusMap[sOrigId] = pResult.getValue('status');
@@ -379,9 +379,9 @@
 
                 oSearchResults.forEach((pResult) => {
 
-                    if (pResult.getValue('isinactive', 'script') === 'T') {
+                    if (toBoolean(pResult.getValue('isinactive', 'script'))) {
                         oStatusMap[pResult.getId()] = 'INACTIVE_SCRIPT';
-                    } else if (pResult.getValue('isdeployed') === 'F') {
+                    } else if (!toBoolean(pResult.getValue('isdeployed'))) {
                         oStatusMap[pResult.getId()] = 'UNDEPLOYED';
                     } else {
                         oStatusMap[pResult.getId()] = pResult.getValue('status');
@@ -763,6 +763,27 @@
     /* ----------------------------------------------------------------
      * Shared — post result back to content script
      * ---------------------------------------------------------------- */
+
+    /**
+     * Normalizes a NetSuite checkbox value to a boolean. N/search 2.x returns
+     * real booleans, SS 1.0 returns 'T'/'F'. Declared as a function so it is
+     * hoisted above the command dispatch at the top of this file.
+     *
+     * @param {*} pValue - Raw checkbox value
+     * @returns {boolean}
+     */
+    function toBoolean(pValue) {
+
+        if (typeof pValue === 'boolean') {
+            return pValue;
+        }
+
+        if (typeof pValue === 'string') {
+            return pValue.toUpperCase() === 'T' || pValue.toLowerCase() === 'yes';
+        }
+
+        return !!pValue;
+    }
 
     /**
      * Posts a result message back to the content script via window.postMessage.
