@@ -26,6 +26,13 @@ const runPopupLogic = async () => {
         oFooterVersion.textContent = 'NetSuite Scripts Manager v' + chrome.runtime.getManifest().version;
     }
 
+    /* Footer brand link: opened as a tab (one per click); attached before the NetSuite-page gates */
+    document.getElementById('footerBrandLink')?.addEventListener('click', (pEvent) => {
+
+        pEvent.preventDefault();
+        chrome.tabs.create({url: pEvent.currentTarget.href}).catch(() => {});
+    });
+
     /* ────────────────────────────────────────────────
      * DOM References
      * ──────────────────────────────────────────────── */
@@ -2898,7 +2905,8 @@ const runPopupLogic = async () => {
             }
 
             /* Poll for data */
-            await pollForData(oTab.id, 8, 400, sRequestId, oFreshEntries, !!pForceRefresh);
+            /* Up to ~10 s (25 x 400 ms): a full nsmain run takes ~3 s live; returns as soon as data arrives */
+            await pollForData(oTab.id, 25, 400, sRequestId, oFreshEntries, !!pForceRefresh);
 
         } catch (pErr) {
             showMessage('Error: ' + pErr.message, true);

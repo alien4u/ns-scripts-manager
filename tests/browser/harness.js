@@ -4,7 +4,7 @@
  *
  * Query params:
  *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter | slow-forms
- *             | count-warnings | cache | no-session
+ *             | count-warnings | cache | no-session | slow-reply | non-netsuite
  *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
  *
  * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
@@ -18,7 +18,7 @@
 
     const SCENARIOS = [
         'record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter', 'slow-forms',
-        'count-warnings', 'cache', 'no-session'
+        'count-warnings', 'cache', 'no-session', 'slow-reply', 'non-netsuite'
     ];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
@@ -29,6 +29,9 @@
     const RUN_STATES = ['active', 'testing', 'current_form', 'unknown_form'];
     const MIN_CONTRAST = 4.5;
     const CACHE_TTL_MS = 2 * 60 * 1000;
+    const NON_NETSUITE_URL = 'https://www.example.com/';
+    const NON_NETSUITE_TEXT = 'Navigate to a NetSuite page to use this extension.';
+    const BRAND_ORIGIN = 'https://www.alientechnologyllc.com';
 
     const oParams = new URLSearchParams(window.location.search);
     const sScenario = oParams.get('scenario') || 'record';
@@ -42,7 +45,7 @@
     const aCspViolations = [];
     const oLog = {
         fetches: [], aborted: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: [],
-        injects: [], replies: [], staleServed: 0
+        injects: [], replies: [], staleServed: 0, polls: 0, injectAt: 0, firstReplyAt: 0
     };
     const oStore = {};
     const oSession = {};
@@ -60,6 +63,7 @@
         forceLightOnce: false,
         advanceClockOnReply: 0,
         deferSessionSet: false,
+        replyDelayMs: 0,
         releaseSessionSet: null
     };
 
@@ -526,6 +530,7 @@
 
                     if (pMessage.type === 'INJECT_AND_GET_DATA') {
                         oLog.injects.push({requestId: pMessage.requestId, cacheKeys: [...(pMessage.cacheKeys || [])]});
+                        oLog.injectAt = performance.now();
                         oState.reply = buildReply(pMessage.requestId, pMessage.cacheKeys || []);
                     }
 
@@ -574,11 +579,18 @@
 
                     if (pMessage.type === 'GET_SCRIPTS_DATA') {
 
-                        if (oState.staleReplies.length > 0) {
+                        oLog.polls++;
+
+                        if (oState.replyDelayMs && performance.now() - oLog.injectAt < oState.replyDelayMs) {
+
+                            /* slow-reply: nsmain has not answered yet (content.js returns null) */
+                            oReply = null;
+                        } else if (oState.staleReplies.length > 0) {
                             oReply = oState.staleReplies.shift();
                             oLog.staleServed++;
                         } else {
                             oReply = structuredClone(oState.reply);
+                            oLog.firstReplyAt = oLog.firstReplyAt || performance.now();
                         }
 
                         /* Entry expires between sending the keys and receiving the reply */
@@ -1497,6 +1509,71 @@
         }
     };
 
+    /* ── Footer brand link (PLAN section 16) ── */
+
+    /**
+     * Footer brand link: markup, footer look in both themes, and one click = exactly one
+     * chrome.tabs.create with the default navigation prevented.
+     *
+     * @param {string} pLabel
+     */
+    const checkFooterLink = async (pLabel) => {
+
+        const oLink = document.getElementById('footerBrandLink');
+
+        check(
+            `${pLabel}: footer brand links to ${BRAND_ORIGIN} (logo + text, new tab, noopener noreferrer)`,
+            !!oLink && oLink.tagName === 'A' && new URL(oLink.href).origin === BRAND_ORIGIN &&
+                oLink.target === '_blank' && oLink.rel === 'noopener noreferrer' &&
+                oLink.textContent.includes('by Alien Technology LLC') && !!oLink.querySelector('img.sm-footer-logo'),
+            oLink ? `href=${oLink.href} target=${oLink.target} rel=${oLink.rel}` : 'no #footerBrandLink'
+        );
+
+        if (!oLink) {
+            return;
+        }
+
+        const oFooterText = document.getElementById('footerVersion');
+        const aLook = [];
+
+        /* Links animate color changes; measure the settled color, not a transition frame */
+        oLink.style.transition = 'none';
+
+        for (const sTheme of ['light', 'dark']) {
+
+            document.body.classList.toggle('theme-dark', sTheme === 'dark');
+            await delay(50);
+
+            const oStyle = getComputedStyle(oLink);
+            aLook.push({
+                theme: sTheme,
+                sameColor: oStyle.color === getComputedStyle(oFooterText).color,
+                underline: oStyle.textDecorationLine
+            });
+        }
+
+        document.body.classList.remove('theme-dark');
+        oLink.style.transition = '';
+        await delay(50);
+
+        check(
+            `${pLabel}: footer brand keeps the footer color and no underline (light and dark)`,
+            aLook.every((pLook) => pLook.sameColor && pLook.underline === 'none'),
+            JSON.stringify(aLook)
+        );
+
+        const nBefore = oLog.tabsCreated.length;
+        const oEvent = new MouseEvent('click', {bubbles: true, cancelable: true});
+        oLink.dispatchEvent(oEvent);
+        const aCreated = oLog.tabsCreated.slice(nBefore);
+
+        check(
+            `${pLabel}: one click opens exactly one tab via chrome.tabs.create; default navigation prevented`,
+            aCreated.length === 1 && new URL(aCreated[0]).origin === BRAND_ORIGIN && oEvent.defaultPrevented,
+            `created=${JSON.stringify(aCreated)} defaultPrevented=${oEvent.defaultPrevented}`
+        );
+    };
+
     /* ── cache / no-session: record-type cache (PLAN section 14) ── */
 
     /**
@@ -1980,9 +2057,11 @@
             oState.stallForms = true;
         } else if (sScenario === 'count-warnings') {
             oState.response.data = buildWarningPayload(oFixture, WARNING_PHASES[0]);
+        } else if (sScenario === 'slow-reply') {
+            oState.replyDelayMs = 5000;
         }
 
-        oState.tabUrl = oFixture.origin + sTabPath;
+        oState.tabUrl = sScenario === 'non-netsuite' ? NON_NETSUITE_URL : oFixture.origin + sTabPath;
 
         /* Test-only clock read by popup.js getNow(); set before popup.js loads */
         window.__NS_SM_TEST_NOW__ = () => oClock.now;
@@ -1995,7 +2074,16 @@
         const oMessage = document.getElementById('message');
         const oCards = document.getElementById('scriptCards');
 
-        if (sScenario === 'no-record' || sScenario === 'no-api') {
+        if (sScenario === 'non-netsuite') {
+
+            check(
+                'Non-NetSuite tab: "Navigate to a NetSuite page" message, no injection',
+                oMessage.classList.contains('visible') && oMessage.textContent === NON_NETSUITE_TEXT &&
+                    oLog.injects.length === 0,
+                `text="${oMessage.textContent}" injects=${oLog.injects.length}`
+            );
+            await checkFooterLink('Non-NetSuite tab');
+        } else if (sScenario === 'no-record' || sScenario === 'no-api') {
 
             const sPrefix = oState.response.error;
 
@@ -2024,6 +2112,7 @@
                 runRecordChecks(oFixture, oPayload);
                 await runExclusivityChecks();
                 await runPendingOpenChecks();
+                await checkFooterLink('Record');
             } else if (sScenario === 'unknown-form') {
                 checkItems(oFixture, oPayload, false);
             } else if (sScenario === 'forms-only') {
@@ -2063,6 +2152,15 @@
                 await runCacheChecks(oFixture, oPayload);
             } else if (sScenario === 'no-session') {
                 await runNoSessionChecks(oFixture, oPayload);
+            } else if (sScenario === 'slow-reply') {
+                const nReplyMs = oLog.firstReplyAt - oLog.injectAt;
+
+                check(
+                    'Slow nsmain reply (~5 s): the popup kept polling and rendered it (no timeout)',
+                    nReplyMs >= 4900 && oLog.polls >= 12 && !oMessage.classList.contains('error'),
+                    `reply after ${nReplyMs.toFixed(0)} ms, ${oLog.polls} polls, message="${oMessage.textContent}"`
+                );
+                checkItems(oFixture, oPayload, false, undefined, 'slow reply');
             }
         }
 

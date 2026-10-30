@@ -10,14 +10,34 @@
 
 (() => {
 
-    /* Guard: prevent multiple injections per page */
-    if (window.__NS_SCRIPTS_MANAGER_INJECTED__) {
-        return;
+    /*
+     * Guard: one live instance per page. An instance orphaned by an extension reload keeps its window
+     * properties but no longer receives messages, so only a probe reporting alive stops this injection.
+     * The pre-1.0.6 boolean flag (__NS_SCRIPTS_MANAGER_INJECTED__) is ignored for the same reason.
+     */
+    try {
+        if (typeof window.__NS_SM_CONTENT_ALIVE__ === 'function' && window.__NS_SM_CONTENT_ALIVE__()) {
+            return;
+        }
+    } catch (e) {
+        /* Probe from an invalidated context: treat the previous instance as gone */
     }
 
-    window.__NS_SCRIPTS_MANAGER_INJECTED__ = true;
-
     const oBrowserRuntime = (typeof browser !== 'undefined' && browser.runtime) ? browser.runtime : chrome.runtime;
+
+    /**
+     * Liveness probe for later injections: an orphaned context has no runtime id (or throws).
+     *
+     * @returns {boolean}
+     */
+    window.__NS_SM_CONTENT_ALIVE__ = () => {
+
+        try {
+            return !!oBrowserRuntime.id;
+        } catch (e) {
+            return false;
+        }
+    };
 
     /* Popup request whose nsmain reply is kept; replies to older requests are ignored */
     let sCurrentRequestId = '';

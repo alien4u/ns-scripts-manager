@@ -715,6 +715,12 @@ body.sm-resizing {
     color: var(--sm-text-muted);
 }
 
+/* Brand link keeps the footer look: muted color, underline only on hover */
+a.sm-footer-brand:hover {
+    color: var(--sm-text-muted);
+    text-decoration: underline;
+}
+
 .sm-footer-logo {
     width: 12px;
     height: 12px;
