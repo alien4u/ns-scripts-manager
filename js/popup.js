@@ -1480,17 +1480,24 @@ const runPopupLogic = async () => {
         oSpinner.style.display = sCards;
     };
 
+    /** Latest Sync open request; bumping it invalidates an open still waiting on storage */
+    let nSchedulerRequest = 0;
+
     /**
-     * Closes the scheduler safety warning / panel when either is open and restores the main view.
+     * Closes the scheduler safety warning / panel, or cancels a Sync open still waiting on
+     * storage (Sync button active, no view yet), and restores the main view.
      *
-     * @returns {boolean} true when a scheduler view was open
+     * @returns {boolean} true when a scheduler view was visible
      */
     const closeSchedulerView = () => {
 
         const bWarningVisible = oSchedulerWarning.style.display === 'block';
         const bPanelVisible = oSchedulerPanel.style.display === 'block';
+        const bOpening = oSchedulerBtn.classList.contains('active');
 
-        if (!bWarningVisible && !bPanelVisible) {
+        nSchedulerRequest++;
+
+        if (!bWarningVisible && !bPanelVisible && !bOpening) {
             return false;
         }
 
@@ -1501,7 +1508,7 @@ const runPopupLogic = async () => {
         if (oMessage.textContent) {
             oMessage.classList.add('visible');
         }
-        return true;
+        return bWarningVisible || bPanelVisible;
     };
 
     /* ────────────────────────────────────────────────
@@ -2236,7 +2243,13 @@ const runPopupLogic = async () => {
         oSchedulerBtn.classList.add('active');
         setSchedulerView(true);
 
+        const nRequest = ++nSchedulerRequest;
         const oStored = await chrome.storage.local.get(['scheduledDeployments']).catch(() => ({}));
+
+        /* Settings (or a later Sync click) took over while storage was read */
+        if (nRequest !== nSchedulerRequest) {
+            return;
+        }
 
         const bHasData = oStored.scheduledDeployments && oStored.scheduledDeployments.length > 0;
 

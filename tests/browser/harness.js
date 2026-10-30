@@ -41,7 +41,13 @@
     const aCspViolations = [];
     const oLog = {fetches: [], aborted: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: []};
     const oStore = {};
-    const oState = {response: null, tabUrl: '', stallForms: false};
+    const oState = {
+        response: null,
+        tabUrl: '',
+        stallForms: false,
+        deferSchedulerGet: false,
+        releaseSchedulerGet: null
+    };
 
     window.addEventListener('error', (pEvent) => {
 
@@ -410,6 +416,16 @@
                     get: async (pKeys) => {
 
                         const aKeys = pKeys == null ? Object.keys(oStore) : [].concat(pKeys);
+
+                        /* Deferred read: held until the harness calls oState.releaseSchedulerGet() */
+                        if (oState.deferSchedulerGet && aKeys.includes('scheduledDeployments')) {
+                            oState.deferSchedulerGet = false;
+                            await new Promise((pResolve) => {
+
+                                oState.releaseSchedulerGet = pResolve;
+                            });
+                        }
+
                         return Object.fromEntries(
                             aKeys.filter((pKey) => pKey in oStore).map((pKey) => [pKey, structuredClone(oStore[pKey])])
                         );
@@ -1073,6 +1089,58 @@
         delete oStore.scheduledDeployments;
     };
 
+    /**
+     * Pending-open race (PLAN section 13): Settings clicked while the Sync handler still awaits
+     * chrome.storage.local.get must win; the stale Sync open shows nothing once storage resolves.
+     * Runs for the warning path (no stored data) and the panel path (stored data).
+     */
+    const runPendingOpenChecks = async () => {
+
+        const oSettingsBtn = document.getElementById('settingsBtn');
+
+        for (const bStoredData of [false, true]) {
+
+            const sPath = bStoredData ? 'panel' : 'warning';
+
+            if (bStoredData) {
+                oStore.scheduledDeployments = [{
+                    internalId: '9001',
+                    deploymentId: 'customdeploy_harness_scheduled',
+                    title: 'Harness Scheduled Deployment',
+                    scriptName: 'Harness Scheduled Script'
+                }];
+            }
+
+            oState.deferSchedulerGet = true;
+            oState.releaseSchedulerGet = null;
+            document.getElementById('schedulerBtn').click();
+            await waitFor(() => !!oState.releaseSchedulerGet, 3000, 'deferred scheduler storage read');
+
+            oSettingsBtn.click();
+            oState.releaseSchedulerGet();
+            await delay(150);
+
+            checkViews(`Settings clicked during the Sync storage read (${sPath} path): Sync view stays closed`, {
+                drawer: true,
+                settingsActive: true,
+                schedulerActive: false,
+                warning: false,
+                panel: false,
+                cards: true,
+                footer: true
+            });
+
+            oSettingsBtn.click();
+            delete oStore.scheduledDeployments;
+        }
+
+        await clickScheduler(true);
+        await clickScheduler(false);
+        checkViews('Sync still opens and closes normally after a cancelled open', {
+            drawer: false, settingsActive: false, schedulerActive: false, warning: false, panel: false, cards: true
+        });
+    };
+
     /* ── count-warnings: Client limit / UE advisory on running deployments (PLAN section 10) ── */
 
     const CLIENT_PREFERENCE_SENTENCE = 'Administrators can remove this limit with the Remove Client Script ' +
@@ -1490,6 +1558,7 @@
             if (sScenario === 'record') {
                 runRecordChecks(oFixture, oPayload);
                 await runExclusivityChecks();
+                await runPendingOpenChecks();
             } else if (sScenario === 'unknown-form') {
                 checkItems(oFixture, oPayload, false);
             } else if (sScenario === 'forms-only') {
