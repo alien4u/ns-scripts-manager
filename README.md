@@ -226,6 +226,9 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Removed the Custom GL Lines (Plug-in) group, which could never populate
 - New default group order: Client, Form Scripts, User Event, Workflows, Workflow Action, Mass Update (saved orders are kept)
 - The group order settings and the Scheduled Deployments Sync panel no longer open at the same time
+- Fixed "Timed out" after the extension is updated or reloaded while a NetSuite tab is open, and when NetSuite responds slowly (waits up to 10 seconds)
+- Fixed records not being detected when NetSuite's SuiteScript 2.x record API returns an empty record (falls back to SuiteScript 1.0)
+- Footer links to Alien Technology LLC
 - Removed the sponsor footer
 
 ### v1.0.5 - 2026-03-12
