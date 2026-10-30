@@ -232,6 +232,32 @@ describe('content.js self-healing guard', () => {
         expect(oExt.send({type: 'RUN_NSMAIN', requestId: 'req-legacy', cacheKeys: []})).toEqual({success: true});
     });
 
+    test('a leftover pre-1.0.6 instance writing window.__NS_SM_SCRIPT_DATA__ cannot replace the current reply', () => {
+
+        const oPage = createPage();
+
+        /* v1.0.5 content.js still listening in a never-reloaded tab: stores every reply on window, no checks */
+        oPage.window.addEventListener('message', (pEvent) => {
+
+            if (pEvent.data.type === 'SCRIPTS_DATA') {
+                oPage.window.__NS_SM_SCRIPT_DATA__ = pEvent.data;
+            }
+        });
+
+        const oExt = createExtension();
+        inject(oPage, oExt);
+
+        oExt.send({type: 'RUN_NSMAIN', requestId: 'req-current', cacheKeys: []});
+        oPage.postFromPage('req-current', {RECORD_TYPE: 'salesorder'});
+
+        /* A late reply from an older nsmain run arrives after the current one */
+        oPage.postFromPage('req-older', {RECORD_TYPE: 'stale'});
+
+        expect(oPage.window.__NS_SM_SCRIPT_DATA__.requestId).toBe('req-older');
+        expect(oExt.send({type: 'GET_SCRIPTS_DATA', requestId: 'req-current'}).data)
+            .toEqual({RECORD_TYPE: 'salesorder'});
+    });
+
     test('a probe that throws (invalidated context) counts as gone', () => {
 
         const oPage = createPage();

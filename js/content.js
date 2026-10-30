@@ -42,6 +42,12 @@
     /* Popup request whose nsmain reply is kept; replies to older requests are ignored */
     let sCurrentRequestId = '';
 
+    /*
+     * Reply to the current request. Kept in this closure, not on window: a leftover pre-1.0.6 instance
+     * in a never-reloaded tab still writes every reply to window.__NS_SM_SCRIPT_DATA__ without checks.
+     */
+    let oScriptData = null;
+
     /* ────────────────────────────────────────────────
      * Forward messages from page (nsmain.js) to storage
      * ──────────────────────────────────────────────── */
@@ -58,7 +64,7 @@
         }
 
         if (pEvent.data.type === 'SCRIPTS_DATA' && pEvent.data.requestId === sCurrentRequestId) {
-            window.__NS_SM_SCRIPT_DATA__ = pEvent.data;
+            oScriptData = pEvent.data;
         }
 
         if (pEvent.data.type === 'SCHEDULER_COLLECT_RESULT' || pEvent.data.type === 'SCHEDULER_CHECK_RESULT' || pEvent.data.type === 'SCHEDULER_APPLY_RESULT') {
@@ -176,15 +182,14 @@
 
         if (pMsg.type === 'GET_SCRIPTS_DATA') {
 
-            const oData = window.__NS_SM_SCRIPT_DATA__;
-            pSendResponse(oData && oData.requestId === pMsg.requestId ? oData : null);
+            pSendResponse(oScriptData && oScriptData.requestId === pMsg.requestId ? oScriptData : null);
         }
 
         if (pMsg.type === 'RUN_NSMAIN') {
 
             /* Every popup request runs nsmain fresh; the previous reply is dropped */
             sCurrentRequestId = pMsg.requestId || '';
-            window.__NS_SM_SCRIPT_DATA__ = null;
+            oScriptData = null;
             injectNSMain(sCurrentRequestId, pMsg.cacheKeys);
             pSendResponse({success: true});
         }
