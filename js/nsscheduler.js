@@ -190,6 +190,27 @@
     }
 
     /**
+     * Normalizes a NetSuite checkbox value to a boolean. N/search 2.x returns
+     * real booleans, SS 1.0 returns 'T'/'F'. Declared as a function so it is
+     * hoisted above the command dispatch at the top of this file.
+     *
+     * @param {*} pValue - Raw checkbox value
+     * @returns {boolean}
+     */
+    function toBoolean(pValue) {
+
+        if (typeof pValue === 'boolean') {
+            return pValue;
+        }
+
+        if (typeof pValue === 'string') {
+            return pValue.toUpperCase() === 'T' || pValue.toLowerCase() === 'yes';
+        }
+
+        return !!pValue;
+    }
+
+    /**
      * Finds deployments not matched by internal ID and resolves them by scriptid.
      * Keys results by the original (production) internal ID so the popup can match.
      *
@@ -763,27 +784,6 @@
     /* ----------------------------------------------------------------
      * Shared — post result back to content script
      * ---------------------------------------------------------------- */
-
-    /**
-     * Normalizes a NetSuite checkbox value to a boolean. N/search 2.x returns
-     * real booleans, SS 1.0 returns 'T'/'F'. Declared as a function so it is
-     * hoisted above the command dispatch at the top of this file.
-     *
-     * @param {*} pValue - Raw checkbox value
-     * @returns {boolean}
-     */
-    function toBoolean(pValue) {
-
-        if (typeof pValue === 'boolean') {
-            return pValue;
-        }
-
-        if (typeof pValue === 'string') {
-            return pValue.toUpperCase() === 'T' || pValue.toLowerCase() === 'yes';
-        }
-
-        return !!pValue;
-    }
 
     /**
      * Posts a result message back to the content script via window.postMessage.

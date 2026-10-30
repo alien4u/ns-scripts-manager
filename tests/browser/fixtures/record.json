@@ -4,6 +4,7 @@
     "recordPath": "/app/accounting/transactions/salesord.nl?id=100&whence=",
     "createPath": "/app/accounting/transactions/salesord.nl?whence=",
     "noRecordPath": "/app/common/scripting/scriptrecord.nl?id=501",
+    "noApiPath": "/pages/customerlogin.jsp",
     "formsHtml": "forms.html",
     "stackHtml": "stack.html",
     "payload": {
@@ -130,6 +131,12 @@
                 "formUrl": "https://harness.app.netsuite.com/app/common/custom/custform.nl?id=14&nl=F&e=T",
                 "scriptUrl": "",
                 "hooks": ["pageInit"]
+            },
+            {
+                "scriptName": "November Form Script", "formName": "Harness Sales Order Form E", "formId": "",
+                "formUrl": "",
+                "scriptUrl": "https://harness.app.netsuite.com/app/common/scripting/script.nl?id=905",
+                "hooks": ["saveRecord"]
             }
         ],
         "formsWithoutScript": ["Harness Sales Order Form C"],

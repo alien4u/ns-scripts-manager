@@ -44,7 +44,11 @@ Open any record, click the icon, and get a clean, organized breakdown of everyth
 
 - 🏷️ **Entry Point Tags** · Each card shows which entry points are defined (beforeLoad, afterSubmit, pageInit, fieldChanged, etc.) so you can see at a glance what each script does.
 
-- ✅ **Deployed-Only Filter** · Show only deployed scripts and released workflows.
+- 🚦 **State Badges** · Each card shows one state badge with a reason tooltip: released, testing (amber), undeployed, script inactive, inactive workflow, or the raw status when not released.
+
+- 🧾 **Form Scripts** · Lists form-level client scripts from the record type's custom forms and marks the ones on the current record's form.
+
+- ✅ **Deployed-Only Filter** · Show only active and testing items: scripts, workflows, and form scripts on the current form (or when the form cannot be determined).
 
 - ⚠️ **Script Count Warnings** · Visual badges warn when a record type approaches or exceeds NetSuite's recommended script limits (10 Client Scripts per record, high User Event counts).
 
@@ -83,7 +87,7 @@ Open any record, click the icon, and get a clean, organized breakdown of everyth
 | Field | Description |
 |-------|-------------|
 | Script Name | Clickable link to the script record |
-| Script Type | User Event, Client, Mass Update, Workflow Action, Custom GL Lines, etc. |
+| Script Type | User Event, Client, Mass Update, Workflow Action, etc. |
 | Deployed | Green dot indicator for active deployments |
 | Status | Released, Testing, etc. (shown as badge) |
 | Entry Points | Tags showing defined hooks (beforeLoad, afterSubmit, pageInit, etc.) |
@@ -210,7 +214,7 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 ### v1.0.6 - 2026-10-29
 
 - One state badge per card with a reason tooltip: released, testing (amber), undeployed, script inactive, or the raw status when not released
-- Deployments with the Deployed checkbox unchecked are now shown as undeployed instead of active
+- Deployments with the Deployed checkbox unchecked now show an "undeployed" badge instead of their release status
 - Inactive workflows are shown as inactive and hidden by the Deployed filter; workflows in Testing stay visible with it
 - Script cards show the deployment script id, linking to the deployment record
 - Works on records in create mode (no `id` in the URL); NetSuite pages without a record show a friendly message

@@ -466,9 +466,10 @@ const runPopupLogic = async () => {
             const sFormUrl = resolveCellHref(pRow.cells[nFormCol]);
             const sFormId = sFormUrl ? (new URL(sFormUrl).searchParams.get('id') || '') : '';
 
+            /* Without both form ids the row may run here, so it stays unknown */
             let sState = 'unknown_form';
 
-            if (pCustomFormId) {
+            if (pCustomFormId && sFormId) {
                 sState = sFormId === pCustomFormId ? 'current_form' : 'other_form';
             }
 
@@ -494,6 +495,9 @@ const runPopupLogic = async () => {
      * ──────────────────────────────────────────────── */
 
     const FORM_SCRIPT_TITLE = 'Runs only on records that use this form';
+
+    /** States kept by the Deployed filter: items that run, or may run, on this record */
+    const RUN_STATES = {active: true, testing: true, current_form: true, unknown_form: true};
 
     /**
      * Appends the state badge (plus a dot for items that run) to a card meta row and dims
@@ -1147,9 +1151,8 @@ const runPopupLogic = async () => {
      */
     const renderAll = (pScriptsData, pWorkflowsData, pFormScriptsData, pScriptError, pWorkflowError) => {
 
-        /* Filter for Deployed Only: keep items that run, or may run, on this record */
+        /* Filter for Deployed Only */
         const bShowOnlyDeployed = oDeployedToggle?.classList.contains('active');
-        const aRunStates = ['active', 'testing', 'current_form', 'unknown_form'];
 
         /**
          * Applies the Deployed filter to a list.
@@ -1160,7 +1163,7 @@ const runPopupLogic = async () => {
         const filterDeployed = (pItems) => {
 
             return bShowOnlyDeployed
-                ? pItems.filter((pItem) => aRunStates.includes(pItem.STATE))
+                ? pItems.filter((pItem) => RUN_STATES[pItem.STATE] === true)
                 : pItems;
         };
 
@@ -2491,8 +2494,8 @@ const runPopupLogic = async () => {
 
                 if (oResponse) {
 
-                    /* Check for error from nsmain.js; no record on the page is not an error */
-                    if (oResponse.error === 'NO_RECORD') {
+                    /* Check for error from nsmain.js; a page without a record or SuiteScript is not an error */
+                    if (oResponse.error === 'NO_RECORD' || oResponse.error === 'NO_API_AVAILABLE') {
                         showMessage('Open a NetSuite record to view its scripts.', false);
                         return;
                     }

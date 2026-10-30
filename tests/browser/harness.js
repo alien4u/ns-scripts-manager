@@ -3,7 +3,7 @@
  * fake `chrome` API and stubbed scriptedrecord.nl responses, then asserts the DOM.
  *
  * Query params:
- *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | deployed-filter
+ *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter
  *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
  *
  * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
@@ -15,7 +15,7 @@
 
 (() => {
 
-    const SCENARIOS = ['record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'deployed-filter'];
+    const SCENARIOS = ['record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter'];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
     const DEFAULT_GROUP_ORDER = ['User Event', 'Client', 'Form Scripts', 'Mass Update', 'Workflow Action', 'Workflows'];
@@ -194,13 +194,13 @@
     /**
      * Expected form-script state for a row's form id.
      *
-     * @param {string} pFormId
+     * @param {string} pFormId - '' when the Form link does not resolve
      * @param {string} pCustomFormId - '' when unknown
      * @returns {string}
      */
     const expectedFormState = (pFormId, pCustomFormId) => {
 
-        if (!pCustomFormId) {
+        if (!pCustomFormId || !pFormId) {
             return 'unknown_form';
         }
 
@@ -601,12 +601,22 @@
 
             const oFormRef = oCard.querySelector('.card-meta .sm-form-ref');
             const oFormLink = oFormRef?.querySelector('a');
-            check(
-                `${sLabel}: "Form: ${pForm.formName}" links to the form, resolved to the NetSuite origin`,
-                !!oFormLink && oFormRef.textContent === `Form: ${pForm.formName}` && oFormLink.href === pForm.formUrl &&
-                    oFormLink.target === '_blank' && new URL(oFormLink.href).origin === pFixture.origin,
-                `text=${oFormRef?.textContent} href=${oFormLink?.href}`
-            );
+
+            if (pForm.formUrl) {
+                check(
+                    `${sLabel}: "Form: ${pForm.formName}" links to the form, resolved to the NetSuite origin`,
+                    !!oFormLink && oFormRef.textContent === `Form: ${pForm.formName}` &&
+                        oFormLink.href === pForm.formUrl && oFormLink.target === '_blank' &&
+                        new URL(oFormLink.href).origin === pFixture.origin,
+                    `text=${oFormRef?.textContent} href=${oFormLink?.href}`
+                );
+            } else {
+                check(
+                    `${sLabel}: "Form: ${pForm.formName}" as plain text when the Form link does not resolve`,
+                    !oFormLink && oFormRef?.textContent === `Form: ${pForm.formName}`,
+                    `text=${oFormRef?.textContent} href=${oFormLink?.href}`
+                );
+            }
 
             checkEqual(
                 `${sLabel}: hook tags`,
@@ -936,6 +946,13 @@
                 error: 'NO_RECORD',
                 message: 'Unable to detect the record type on this page.'
             };
+        } else if (sScenario === 'no-api') {
+            sTabPath = oFixture.noApiPath || oFixture.noRecordPath;
+            oState.response = {
+                type: 'SCRIPTS_DATA',
+                error: 'NO_API_AVAILABLE',
+                message: 'Neither SuiteScript 2.x (require) nor SuiteScript 1.0 (nlapi) is available on this page.'
+            };
         } else if (sScenario === 'deployed-filter') {
             oStore.deployedOnly = true;
             oStore.groupOrder = [...LEGACY_GROUP_ORDER];
@@ -951,18 +968,20 @@
         const oMessage = document.getElementById('message');
         const oCards = document.getElementById('scriptCards');
 
-        if (sScenario === 'no-record') {
+        if (sScenario === 'no-record' || sScenario === 'no-api') {
+
+            const sPrefix = oState.response.error;
 
             check(
-                'No record: friendly message shown without the error class',
+                `${sPrefix}: friendly message shown without the error class`,
                 oMessage.classList.contains('visible') && oMessage.textContent === NO_RECORD_TEXT &&
                     !oMessage.classList.contains('error'),
                 `text="${oMessage.textContent}" class="${oMessage.className}"`
             );
-            check('No record: no cards rendered', oCards.children.length === 0, 'cards rendered');
-            check('No record: scriptedrecord.nl not fetched', oLog.fetches.length === 0, JSON.stringify(oLog.fetches));
+            check(`${sPrefix}: no cards rendered`, oCards.children.length === 0, 'cards rendered');
+            check(`${sPrefix}: scriptedrecord.nl not fetched`, oLog.fetches.length === 0, JSON.stringify(oLog.fetches));
             check(
-                'No record: Scripted Records button stays disabled',
+                `${sPrefix}: Scripted Records button stays disabled`,
                 document.getElementById('scriptedRecordsBtn').disabled,
                 'enabled'
             );
