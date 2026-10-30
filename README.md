@@ -22,6 +22,8 @@
 | Edge Add-ons | v1.0.5 | [Install](https://microsoftedge.microsoft.com/addons/detail/netsuite-scripts-manager/agcnfafjphndnhpmlhpkieaajdejcicf) |
 | Firefox Add-ons | v1.0.5 | [Install](https://addons.mozilla.org/en-US/firefox/addon/netsuite-scripts-manager/) |
 
+> v1.0.6 has been submitted to all stores and is pending review.
+
 ## Overview
 
 NetSuite Scripts Manager is a browser extension for NetSuite administrators, developers, and consultants. It gives you instant visibility into every script deployment and workflow attached to any record type you're viewing in NetSuite. No more digging through script deployment lists or the workflow manager.
