@@ -289,6 +289,32 @@ const runPopupLogic = async () => {
     let bStackOrderAvailable = false;
 
     /* ────────────────────────────────────────────────
+     * Scripted Record Page Fetch (stack order, form scripts)
+     * ──────────────────────────────────────────────── */
+
+    const SCRAPE_TIMEOUT_MS = 5000;
+
+    /**
+     * Fetches a NetSuite page as HTML. Aborts after SCRAPE_TIMEOUT_MS (headers and body), so a
+     * stalled request rejects into the caller's non-critical path instead of holding the render.
+     *
+     * @param {string} pUrl
+     * @returns {Promise<string>} Page HTML, '' when the response is not OK
+     */
+    const fetchPageHtml = async (pUrl) => {
+
+        const oController = new AbortController();
+        const nTimer = setTimeout(() => oController.abort(), SCRAPE_TIMEOUT_MS);
+
+        try {
+            const oResponse = await fetch(pUrl, {credentials: 'include', signal: oController.signal});
+            return oResponse.ok ? await oResponse.text() : '';
+        } finally {
+            clearTimeout(nTimer);
+        }
+    };
+
+    /* ────────────────────────────────────────────────
      * Stack Order — Scripted Record Page Scraper
      * ──────────────────────────────────────────────── */
 
@@ -305,13 +331,12 @@ const runPopupLogic = async () => {
 
         const sUrl = `${pOrigin}/app/common/scripting/scriptedrecord.nl?id=${pRecordType.toUpperCase()}`;
 
-        const oResponse = await fetch(sUrl, {credentials: 'include'});
+        const sHtml = await fetchPageHtml(sUrl);
 
-        if (!oResponse.ok) {
+        if (!sHtml) {
             return new Map();
         }
 
-        const sHtml = await oResponse.text();
         const oParser = new DOMParser();
         const oDoc = oParser.parseFromString(sHtml, 'text/html');
 
@@ -387,13 +412,12 @@ const runPopupLogic = async () => {
         const sUrl = `${pOrigin}/app/common/scripting/scriptedrecord.nl` +
             `?r=T&id=${pRecordType.toUpperCase()}&machine=forms`;
 
-        const oResponse = await fetch(sUrl, {credentials: 'include'});
+        const sHtml = await fetchPageHtml(sUrl);
 
-        if (!oResponse.ok) {
+        if (!sHtml) {
             return [];
         }
 
-        const sHtml = await oResponse.text();
         const oDoc = new DOMParser().parseFromString(sHtml, 'text/html');
         const oTable = oDoc.getElementById('forms_splits');
         const oHeaderRow = oTable?.querySelector('tr.uir-machine-headerrow, tr.uir-list-headerrow');

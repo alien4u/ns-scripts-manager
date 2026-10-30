@@ -88,7 +88,7 @@ Open any record, click the icon, and get a clean, organized breakdown of everyth
 |-------|-------------|
 | Script Name | Clickable link to the script record |
 | Script Type | User Event, Client, Mass Update, Workflow Action, etc. |
-| Deployed | Green dot indicator for active deployments |
+| Deployed | Green dot for active deployments, amber dot for testing |
 | Status | Released, Testing, etc. (shown as badge) |
 | Entry Points | Tags showing defined hooks (beforeLoad, afterSubmit, pageInit, etc.) |
 | Info (hover) | Script file name, API version, description |

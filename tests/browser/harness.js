@@ -3,7 +3,7 @@
  * fake `chrome` API and stubbed scriptedrecord.nl responses, then asserts the DOM.
  *
  * Query params:
- *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter
+ *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter | slow-forms
  *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
  *
  * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
@@ -15,7 +15,9 @@
 
 (() => {
 
-    const SCENARIOS = ['record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter'];
+    const SCENARIOS = [
+        'record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter', 'slow-forms'
+    ];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
     const DEFAULT_GROUP_ORDER = ['User Event', 'Client', 'Form Scripts', 'Mass Update', 'Workflow Action', 'Workflows'];
@@ -34,9 +36,9 @@
 
     const fnNativeFetch = window.fetch.bind(window);
     const aPageErrors = [];
-    const oLog = {fetches: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: []};
+    const oLog = {fetches: [], aborted: [], maxInFlight: 0, runtimeMessages: [], storageSets: [], tabsCreated: []};
     const oStore = {};
-    const oState = {response: null, tabUrl: ''};
+    const oState = {response: null, tabUrl: '', stallForms: false};
 
     window.addEventListener('error', (pEvent) => {
 
@@ -238,16 +240,36 @@
     };
 
     /**
-     * Finds a script card by deployment id.
+     * Deployment internal id from a deployment record URL (`id` param), '' when absent.
      *
-     * @param {string} pDeploymentId
+     * @param {string} pUrl
+     * @returns {string}
+     */
+    const deploymentKey = (pUrl) => {
+
+        try {
+            return new URL(pUrl).searchParams.get('id') || '';
+        } catch (pErr) {
+            return '';
+        }
+    };
+
+    /**
+     * Finds a script card by deployment internal id. Script ids such as customdeploy1 repeat
+     * across scripts in real accounts, so the card's deployment link is matched instead.
+     *
+     * @param {string} pDeploymentUrl - DEPLOYMENT_URL from the payload
      * @returns {HTMLElement|undefined}
      */
-    const findScriptCard = (pDeploymentId) => {
+    const findScriptCard = (pDeploymentUrl) => {
 
-        return [...document.querySelectorAll('#scriptCards .script-card')].find((pCard) =>
-            pCard.querySelector('.sm-deploy-id')?.textContent === pDeploymentId
-        );
+        const sKey = deploymentKey(pDeploymentUrl);
+
+        return [...document.querySelectorAll('#scriptCards .script-card')].find((pCard) => {
+
+            const oLink = pCard.querySelector('.sm-deploy-id');
+            return !!sKey && !!oLink && deploymentKey(oLink.href) === sKey;
+        });
     };
 
     /**
@@ -447,7 +469,27 @@
             }
 
             const bForms = new URL(sUrl).searchParams.get('machine') === 'forms';
-            oLog.fetches.push({url: sUrl, kind: bForms ? 'forms' : 'stack', credentials: pInit?.credentials});
+            const oSignal = pInit?.signal;
+
+            oLog.fetches.push({
+                url: sUrl,
+                kind: bForms ? 'forms' : 'stack',
+                credentials: pInit?.credentials,
+                signal: oSignal instanceof AbortSignal,
+                at: performance.now()
+            });
+
+            /* slow-forms: the forms request never answers; only the popup's AbortSignal ends it */
+            if (bForms && oState.stallForms) {
+                return new Promise((pResolve, pReject) => {
+
+                    oSignal?.addEventListener('abort', () => {
+
+                        oLog.aborted.push({kind: 'forms', at: performance.now()});
+                        pReject(new DOMException('The operation was aborted.', 'AbortError'));
+                    }, {once: true});
+                });
+            }
 
             nInFlight++;
             oLog.maxInFlight = Math.max(oLog.maxInFlight, nInFlight);
@@ -501,13 +543,14 @@
 
     /**
      * Checks every payload item and expected form script: present with the right badge, or
-     * absent when the Deployed filter hides it.
+     * absent when the Deployed filter hides it. No expected form scripts -> no Form Scripts group.
      *
      * @param {Object} pFixture
      * @param {Object} pPayload - Payload the popup received
      * @param {boolean} pDeployedOnly
+     * @param {Array} [pFormScripts] - Expected form scripts, defaults to the fixture's
      */
-    const checkItems = (pFixture, pPayload, pDeployedOnly) => {
+    const checkItems = (pFixture, pPayload, pDeployedOnly, pFormScripts = pFixture.expect.formScripts) => {
 
         const sSuffix = pDeployedOnly ? ' [Deployed filter]' : '';
 
@@ -521,8 +564,9 @@
 
         pPayload.SCRIPTS_DATA.forEach((pScript) => {
 
-            const sLabel = `Script ${pScript.DEPLOYMENT_ID} [${pScript.STATE}]${sSuffix}`;
-            const oCard = findScriptCard(pScript.DEPLOYMENT_ID);
+            const sKey = deploymentKey(pScript.DEPLOYMENT_URL);
+            const sLabel = `Script ${pScript.DEPLOYMENT_ID} (#${sKey}) [${pScript.STATE}]${sSuffix}`;
+            const oCard = findScriptCard(pScript.DEPLOYMENT_URL);
 
             if (!isShown(pScript.STATE)) {
                 check(`${sLabel}: hidden`, !oCard, 'card is rendered');
@@ -564,7 +608,15 @@
             checkBadge(sLabel, oCard, expectedBadge(pWorkflow.STATE, pWorkflow.STATUS, 'workflow'));
         });
 
-        pFixture.expect.formScripts.forEach((pForm) => {
+        if (pFormScripts.length === 0) {
+            check(
+                `No Form Scripts group when no form scripts are expected${sSuffix}`,
+                !getSections().some((pSection) => pSection.title === 'Form Scripts'),
+                'Form Scripts group rendered'
+            );
+        }
+
+        pFormScripts.forEach((pForm) => {
 
             const sState = expectedFormState(pForm.formId, pPayload.CUSTOM_FORM_ID || '');
             const sLabel = `Form script "${pForm.scriptName}" [${sState}]${sSuffix}`;
@@ -674,6 +726,87 @@
         } else {
             check('Stack order page not fetched without deployments', aStack.length === 0, JSON.stringify(aStack));
         }
+
+        check(
+            'Every scriptedrecord.nl request carries an AbortSignal (bounded by the popup timeout)',
+            oLog.fetches.length > 0 && oLog.fetches.every((pFetch) => pFetch.signal),
+            JSON.stringify(oLog.fetches)
+        );
+    };
+
+    /**
+     * Checks the fixture's expected stack order per script group (deployment id text sequence).
+     *
+     * @param {Object} pFixture
+     */
+    const checkStackOrder = (pFixture) => {
+
+        Object.entries(pFixture.expect.stackOrder).forEach(([pGroup, pIds]) => {
+
+            checkEqual(
+                `Stack order applied to ${pGroup} Scripts`,
+                getSectionCards(pGroup + ' Scripts').map((pCard) => pCard.querySelector('.sm-deploy-id').textContent),
+                pIds
+            );
+        });
+    };
+
+    /**
+     * Deployment id truncation: ellipsis styling always; actual clipping only when the fixture's
+     * truncatedDeploymentId is wider than the space its meta row leaves for it.
+     *
+     * @param {Object} pFixture
+     */
+    const checkTruncation = (pFixture) => {
+
+        const sId = pFixture.expect.truncatedDeploymentId;
+
+        if (!sId) {
+            return;
+        }
+
+        const oLink = [...document.querySelectorAll('#scriptCards .sm-deploy-id')]
+            .find((pEl) => pEl.textContent === sId);
+
+        if (!oLink) {
+            check(`Deployment id "${sId}" rendered for the truncation check`, false, 'not found');
+            return;
+        }
+
+        const oStyle = getComputedStyle(oLink);
+        check(
+            'Deployment id styled to truncate (text-overflow ellipsis, overflow hidden, nowrap)',
+            oStyle.textOverflow === 'ellipsis' && oStyle.overflowX === 'hidden' && oStyle.whiteSpace === 'nowrap',
+            `text-overflow=${oStyle.textOverflow} overflow=${oStyle.overflowX} white-space=${oStyle.whiteSpace}`
+        );
+
+        /* Space left for the id = meta row content width minus siblings and flex gaps */
+        const oMeta = oLink.parentElement;
+        const oMetaStyle = getComputedStyle(oMeta);
+        const aSiblings = [...oMeta.children].filter((pChild) => pChild !== oLink);
+        const nSiblingsWidth = aSiblings.reduce((pSum, pChild) => pSum + pChild.getBoundingClientRect().width, 0);
+        const nGaps = (parseFloat(oMetaStyle.columnGap) || 0) * aSiblings.length;
+        const nPadding = parseFloat(oMetaStyle.paddingLeft) + parseFloat(oMetaStyle.paddingRight);
+        const nAvailable = oMeta.clientWidth - nPadding - nSiblingsWidth - nGaps;
+
+        /* Natural single-line width of the id in the link's font */
+        const oContext = document.createElement('canvas').getContext('2d');
+        oContext.font = oStyle.font;
+        const nNatural = oContext.measureText(sId).width;
+
+        if (nNatural <= nAvailable + 1) {
+            check(
+                `Deployment id "${sId}" fits (${nNatural.toFixed(0)}px <= ${nAvailable.toFixed(0)}px), no clip needed`,
+                true
+            );
+            return;
+        }
+
+        check(
+            `Long deployment id clipped with ellipsis (${nNatural.toFixed(0)}px > ${nAvailable.toFixed(0)}px)`,
+            oLink.scrollWidth > oLink.clientWidth && oLink.clientWidth <= nAvailable + 1,
+            `scrollWidth=${oLink.scrollWidth} clientWidth=${oLink.clientWidth}`
+        );
     };
 
     /**
@@ -741,34 +874,24 @@
             expectedSectionTitles(pFixture, pPayload)
         );
 
-        checkEqual(
-            'Form Scripts count excludes forms without a script',
-            getSections().find((pSection) => pSection.title === 'Form Scripts')?.count,
-            `(${pFixture.expect.formScripts.length})`
-        );
-
-        checkEqual(
-            'Form Scripts keep source order under Stack Order sort',
-            getSectionCards('Form Scripts').map((pCard) => pCard.querySelector('.card-name').textContent.trim()),
-            pFixture.expect.formScripts.map((pForm) => pForm.scriptName)
-        );
-
-        Object.entries(pFixture.expect.stackOrder).forEach(([pGroup, pIds]) => {
+        /* With zero expected form scripts, checkItems already asserts the group is absent */
+        if (pFixture.expect.formScripts.length > 0) {
 
             checkEqual(
-                `Stack order applied to ${pGroup} Scripts`,
-                getSectionCards(pGroup + ' Scripts').map((pCard) => pCard.querySelector('.sm-deploy-id').textContent),
-                pIds
+                'Form Scripts count excludes forms without a script',
+                getSections().find((pSection) => pSection.title === 'Form Scripts')?.count,
+                `(${pFixture.expect.formScripts.length})`
             );
-        });
 
-        const oLongLink = findScriptCard(pFixture.expect.truncatedDeploymentId)?.querySelector('.sm-deploy-id');
-        check(
-            'Long deployment id truncates with ellipsis',
-            !!oLongLink && getComputedStyle(oLongLink).textOverflow === 'ellipsis' &&
-                oLongLink.scrollWidth > oLongLink.clientWidth,
-            oLongLink ? `scrollWidth=${oLongLink.scrollWidth} clientWidth=${oLongLink.clientWidth}` : 'not found'
-        );
+            checkEqual(
+                'Form Scripts keep source order under Stack Order sort',
+                getSectionCards('Form Scripts').map((pCard) => pCard.querySelector('.card-name').textContent.trim()),
+                pFixture.expect.formScripts.map((pForm) => pForm.scriptName)
+            );
+        }
+
+        checkStackOrder(pFixture);
+        checkTruncation(pFixture);
 
         const aDrawer = readDrawerGroups();
         checkEqual('Settings drawer shows the default group order without Custom GL', aDrawer, DEFAULT_GROUP_ORDER);
@@ -822,6 +945,48 @@
     };
 
     /**
+     * slow-forms: the forms request never answers; the popup timeout must abort it and render
+     * scripts and workflows without a Form Scripts group or an error.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPayload
+     */
+    const runSlowFormsChecks = (pFixture, pPayload) => {
+
+        const oFormsFetch = oLog.fetches.find((pFetch) => pFetch.kind === 'forms');
+        const oAbort = oLog.aborted.find((pAbort) => pAbort.kind === 'forms');
+        const nWaitMs = oFormsFetch && oAbort ? oAbort.at - oFormsFetch.at : -1;
+
+        check(
+            'Stalled forms request aborted by the popup timeout (~5 s)',
+            !!oFormsFetch && oFormsFetch.signal && !!oAbort && nWaitMs >= 4500,
+            `signal=${oFormsFetch?.signal} aborted=${!!oAbort} after ${nWaitMs.toFixed(0)} ms`
+        );
+
+        const aStack = oLog.fetches.filter((pFetch) => pFetch.kind === 'stack');
+        check(
+            'Stack order page fetched normally (credentials include, AbortSignal)',
+            aStack.length === 1 && aStack[0].credentials === 'include' && aStack[0].signal,
+            JSON.stringify(aStack)
+        );
+
+        checkItems(pFixture, pPayload, false, []);
+        checkStackOrder(pFixture);
+
+        const oMessage = document.getElementById('message');
+        check(
+            'No error shown after the timeout',
+            !oMessage.classList.contains('error') && !document.querySelector('#scriptCards .sm-error-row'),
+            `message class="${oMessage.className}" text="${oMessage.textContent}"`
+        );
+        check(
+            'Spinner hidden after the timeout',
+            document.getElementById('spinner').classList.contains('hidden'),
+            'visible'
+        );
+    };
+
+    /**
      * deployed-filter: Deployed pill on (stored), legacy stored group order, then unknown form.
      *
      * @param {Object} pFixture
@@ -847,7 +1012,7 @@
 
         const aTesting = [
             ...pPayload.SCRIPTS_DATA.filter((pScript) => pScript.STATE === 'testing')
-                .map((pScript) => findScriptCard(pScript.DEPLOYMENT_ID)),
+                .map((pScript) => findScriptCard(pScript.DEPLOYMENT_URL)),
             ...pPayload.WORKFLOWS_DATA.filter((pWorkflow) => pWorkflow.STATE === 'testing')
                 .map((pWorkflow) => findNamedCard('Workflows', pWorkflow.WORKFLOW_NAME))
         ];
@@ -956,6 +1121,8 @@
         } else if (sScenario === 'deployed-filter') {
             oStore.deployedOnly = true;
             oStore.groupOrder = [...LEGACY_GROUP_ORDER];
+        } else if (sScenario === 'slow-forms') {
+            oState.stallForms = true;
         }
 
         oState.tabUrl = oFixture.origin + sTabPath;
@@ -1026,6 +1193,8 @@
                 checkItems(oFixture, oPayload, false);
             } else if (sScenario === 'deployed-filter') {
                 await runDeployedFilterChecks(oFixture, oPayload);
+            } else if (sScenario === 'slow-forms') {
+                runSlowFormsChecks(oFixture, oPayload);
             }
         }
 
