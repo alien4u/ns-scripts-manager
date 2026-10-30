@@ -4,6 +4,7 @@
  *
  * Query params:
  *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter | slow-forms
+ *             | count-warnings
  *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
  *
  * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
@@ -16,7 +17,8 @@
 (() => {
 
     const SCENARIOS = [
-        'record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter', 'slow-forms'
+        'record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter', 'slow-forms',
+        'count-warnings'
     ];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
@@ -223,6 +225,7 @@
         return [...document.querySelectorAll('#scriptCards .section-header')].map((pHeader) => ({
             title: pHeader.querySelector('.section-header-text').textContent,
             count: pHeader.querySelector('.section-header-count').textContent,
+            header: pHeader,
             body: pHeader.nextElementSibling
         }));
     };
@@ -944,6 +947,202 @@
         document.getElementById('darkToggle').click();
     };
 
+    /* ── count-warnings: Client limit / UE advisory on running deployments (PLAN section 10) ── */
+
+    const CLIENT_PREFERENCE_SENTENCE = 'Administrators can remove this limit with the Remove Client Script ' +
+        'Deployment Limit per Record preference (NetSuite 2026.2+).';
+    const CLIENT_LIMIT_TIP = 'By default, a maximum of 10 Client scripts can be deployed per record. ' +
+        'Scripts beyond this limit will not execute. ' + CLIENT_PREFERENCE_SENTENCE;
+    const CLIENT_APPROACH_TIP = 'Approaching the default limit of 10 Client scripts per record. ' +
+        CLIENT_PREFERENCE_SENTENCE;
+    const UE_ADVISORY_TIP = 'Avoid assigning too many scripts to one record type. ' +
+        'A high number of User Event scripts can increase load and save times.';
+
+    /**
+     * STATE list: running deployments followed by non-running ones (undeployed, script inactive,
+     * not released, cycling).
+     *
+     * @param {number} pActive
+     * @param {number} pTesting
+     * @param {number} pNotRunning
+     * @returns {string[]}
+     */
+    const makeStates = (pActive, pTesting, pNotRunning) => {
+
+        const aNotRunning = ['undeployed', 'script_inactive', 'not_released'];
+
+        return [
+            ...Array(pActive).fill('active'),
+            ...Array(pTesting).fill('testing'),
+            ...Array.from({length: pNotRunning}, (pUnused, pIndex) => aNotRunning[pIndex % aNotRunning.length])
+        ];
+    };
+
+    const WARNING_PHASES = [
+        {
+            label: '(a) 12 Client, 7 running, limit in force',
+            client: makeStates(7, 0, 5), ue: [], limitRemoved: false, expectClient: null
+        },
+        {
+            label: '(b) 12 Client, 10 running, CLIENT_LIMIT_REMOVED false',
+            client: makeStates(8, 2, 2), ue: [], limitRemoved: false,
+            expectClient: {look: 'danger', text: 'LIMIT', tip: CLIENT_LIMIT_TIP}
+        },
+        {
+            label: '(c) 12 Client, 10 running, CLIENT_LIMIT_REMOVED true',
+            client: makeStates(8, 2, 2), ue: [], limitRemoved: true, expectClient: null
+        },
+        {
+            label: '(d1) 12 User Event, 9 running',
+            client: [], ue: makeStates(8, 1, 3), limitRemoved: false, expectUe: null
+        },
+        {
+            label: '(d2) 12 User Event, 10 running',
+            client: [], ue: makeStates(9, 1, 2), limitRemoved: false,
+            expectUe: {look: 'warn', text: '10', tip: UE_ADVISORY_TIP}
+        },
+        {
+            label: '(e) 13 Client, 9 running, CLIENT_LIMIT_REMOVED false',
+            client: makeStates(7, 2, 4), ue: [], limitRemoved: false,
+            expectClient: {look: 'warn', text: '9', tip: CLIENT_APPROACH_TIP},
+            alsoDeployedFilter: true
+        },
+        {
+            label: '(f) 10 Client, 10 running, CLIENT_LIMIT_REMOVED null',
+            client: makeStates(10, 0, 0), ue: [], limitRemoved: null,
+            expectClient: {look: 'danger', text: 'LIMIT', tip: CLIENT_LIMIT_TIP}
+        }
+    ];
+
+    /**
+     * Builds a synthetic payload for one warning phase.
+     *
+     * @param {Object} pFixture
+     * @param {Object} pPhase - WARNING_PHASES entry
+     * @returns {Object}
+     */
+    const buildWarningPayload = (pFixture, pPhase) => {
+
+        const oPayload = structuredClone(pFixture.payload);
+        const oStatusByState = {active: 'Released', testing: 'Testing', not_released: 'Not Scheduled'};
+        let nId = 800;
+
+        /**
+         * Synthetic deployments of one script type.
+         *
+         * @param {string} pType
+         * @param {string[]} pStates
+         * @returns {Object[]}
+         */
+        const makeScripts = (pType, pStates) => pStates.map((pState) => {
+
+            nId++;
+
+            return {
+                ID: nId,
+                SCRIPT: nId + 1000,
+                DEPLOYMENT_ID: `customdeploy_warn_${nId}`,
+                SCRIPT_NAME: `${pType} Warning Sample ${nId}`,
+                SCRIPT_TYPE: pType,
+                DEPLOYED: pState !== 'undeployed',
+                STATUS: oStatusByState[pState] || 'Released',
+                INACTIVE: pState === 'script_inactive',
+                STATE: pState,
+                URL: `${pFixture.origin}/app/common/scripting/script.nl?id=${nId + 1000}&whence=`,
+                DEPLOYMENT_URL: `${pFixture.origin}/app/common/scripting/scriptrecord.nl?id=${nId}`,
+                FILE_URL: `${pFixture.origin}/app/common/record/edittextmediaitem.nl?id=${nId + 2000}&e=T`,
+                INFO: 'N/A',
+                HIDE_IN_BUNDLE: false
+            };
+        });
+
+        oPayload.SCRIPTS_DATA = [...makeScripts('Client', pPhase.client), ...makeScripts('User Event', pPhase.ue)];
+        oPayload.CLIENT_LIMIT_REMOVED = pPhase.limitRemoved;
+        return oPayload;
+    };
+
+    /**
+     * Asserts the header count and warning badge of one script group.
+     *
+     * @param {string} pLabel
+     * @param {string} pTitle - Section header text
+     * @param {number} pRenderedCount - Expected "(N)" header count
+     * @param {Object|null|undefined} pExpect - {look, text, tip}; falsy = no badge
+     */
+    const checkWarning = (pLabel, pTitle, pRenderedCount, pExpect) => {
+
+        const oSection = getSections().find((pSection) => pSection.title === pTitle);
+
+        if (!oSection) {
+            check(`${pLabel}: ${pTitle} group rendered`, false, 'missing');
+            return;
+        }
+
+        checkEqual(`${pLabel}: ${pTitle} header count shows rendered cards`, oSection.count, `(${pRenderedCount})`);
+
+        const oWarn = oSection.header.querySelector('.sm-count-warn');
+        const sBadge = oWarn?.firstChild?.nodeValue || '';
+
+        if (!pExpect) {
+            check(`${pLabel}: no ${pTitle} warning badge`, !oWarn, `badge "${sBadge}" shown`);
+            return;
+        }
+
+        check(
+            `${pLabel}: ${pTitle} ${pExpect.look} badge "${pExpect.text}"`,
+            !!oWarn && oWarn.classList.contains(pExpect.look) && sBadge === pExpect.text,
+            `class="${oWarn?.className}" text="${sBadge}"`
+        );
+        checkEqual(
+            `${pLabel}: ${pTitle} warning tooltip`,
+            oWarn?.querySelector('.sm-warn-tooltip span')?.textContent,
+            pExpect.tip
+        );
+        check(
+            `${pLabel}: ${pTitle} warning keeps the docs link`,
+            !!oWarn?.querySelector('.sm-warn-tooltip a[href^="https://docs.oracle.com/"]'),
+            'link missing'
+        );
+    };
+
+    /**
+     * count-warnings: runs every WARNING_PHASES case; the first is already rendered, the rest
+     * are loaded through the Refresh button.
+     *
+     * @param {Object} pFixture
+     */
+    const runCountWarningChecks = async (pFixture) => {
+
+        for (let nPhase = 0; nPhase < WARNING_PHASES.length; nPhase++) {
+
+            const oPhase = WARNING_PHASES[nPhase];
+
+            if (nPhase > 0) {
+                oState.response = {type: 'SCRIPTS_DATA', error: null, data: buildWarningPayload(pFixture, oPhase)};
+                document.getElementById('refreshBtn').click();
+                await waitFor(isRendered, 10000, `refresh render ${oPhase.label}`);
+                await delay(100);
+            }
+
+            if (oPhase.client.length > 0) {
+                checkWarning(oPhase.label, 'Client Scripts', oPhase.client.length, oPhase.expectClient);
+            }
+
+            if (oPhase.ue.length > 0) {
+                checkWarning(oPhase.label, 'User Event Scripts', oPhase.ue.length, oPhase.expectUe);
+            }
+
+            if (oPhase.alsoDeployedFilter) {
+
+                const nRunning = oPhase.client.filter((pState) => pState === 'active' || pState === 'testing').length;
+
+                document.getElementById('deployedToggle').click();
+                checkWarning(`${oPhase.label} [Deployed filter]`, 'Client Scripts', nRunning, oPhase.expectClient);
+                document.getElementById('deployedToggle').click();
+            }
+        }
+    };
+
     /**
      * slow-forms: the forms request never answers; the popup timeout must abort it and render
      * scripts and workflows without a Form Scripts group or an error.
@@ -1123,6 +1322,8 @@
             oStore.groupOrder = [...LEGACY_GROUP_ORDER];
         } else if (sScenario === 'slow-forms') {
             oState.stallForms = true;
+        } else if (sScenario === 'count-warnings') {
+            oState.response.data = buildWarningPayload(oFixture, WARNING_PHASES[0]);
         }
 
         oState.tabUrl = oFixture.origin + sTabPath;
@@ -1195,6 +1396,8 @@
                 await runDeployedFilterChecks(oFixture, oPayload);
             } else if (sScenario === 'slow-forms') {
                 runSlowFormsChecks(oFixture, oPayload);
+            } else if (sScenario === 'count-warnings') {
+                await runCountWarningChecks(oFixture);
             }
         }
 

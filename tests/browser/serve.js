@@ -43,4 +43,5 @@ const oServer = Bun.serve({
 });
 
 console.log(`Popup harness: http://${sHost}:${oServer.port}${sHarnessPath}`);
-console.log('Scenarios: record, unknown-form, forms-only, create-mode, no-record, no-api, deployed-filter, slow-forms');
+console.log('Scenarios: record, unknown-form, forms-only, create-mode, no-record, no-api, deployed-filter, ' +
+    'slow-forms, count-warnings');

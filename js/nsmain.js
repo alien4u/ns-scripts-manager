@@ -140,6 +140,34 @@
         return String(sFormId);
     };
 
+    /**
+     * Reads the "Remove Client Script Deployment Limit per Record" company preference
+     * (REMOVECLIENTGOVERNANCELIMIT, NetSuite 2026.2+).
+     *
+     * @param {Object} [pRuntime] - N/runtime module (SS 2.x path); omitted on the SS 1.0 path
+     * @returns {boolean|null} true = limit removed, false = limit in force, null = unknown
+     */
+    const getClientLimitRemoved = (pRuntime) => {
+
+        const sPreference = 'REMOVECLIENTGOVERNANCELIMIT';
+        let vPreference;
+
+        try {
+            /* 2.x returns a boolean, 1.0 'T'/'F'; both return undefined/null for an unknown preference */
+            vPreference = pRuntime
+                ? pRuntime.getCurrentUser().getPreference({name: sPreference})
+                : nlapiGetContext().getPreference(sPreference);
+        } catch (e) {
+            return null;
+        }
+
+        if (vPreference === undefined || vPreference === null || vPreference === '') {
+            return null;
+        }
+
+        return toBoolean(vPreference);
+    };
+
     /* ────────────────────────────────────────────────
      * SuiteScript 2.x Approach (N/query + N/search)
      * ──────────────────────────────────────────────── */
@@ -558,6 +586,7 @@
                 WORKFLOW_ERROR: oWorkflowsResult.error || '',
                 RECORD_TYPE: sRecordType,
                 CUSTOM_FORM_ID: sCustomFormId,
+                CLIENT_LIMIT_REMOVED: getClientLimitRemoved(null),
                 API_VERSION: '1.0'
             }
         }, window.location.origin);
@@ -606,9 +635,9 @@
 
         try {
 
-            require(['N/query', 'N/search', 'N/util', 'N/currentRecord'],
+            require(['N/query', 'N/search', 'N/util', 'N/currentRecord', 'N/runtime'],
 
-                (pQuery, pSearch, pUtil, pCurrentRecord) => {
+                (pQuery, pSearch, pUtil, pCurrentRecord, pRuntime) => {
 
                     if (bDidFail) {
                         return;
@@ -660,6 +689,7 @@
                             WORKFLOW_ERROR: sWorkflowError,
                             RECORD_TYPE: sRecordType,
                             CUSTOM_FORM_ID: sCustomFormId,
+                            CLIENT_LIMIT_REMOVED: getClientLimitRemoved(pRuntime),
                             API_VERSION: '2.x'
                         }
                     }, window.location.origin);

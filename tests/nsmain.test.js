@@ -101,7 +101,7 @@ const oaWorkflowResultsV1 = aWorkflowDefs.map(([pId, pValue, pText, pInactive]) 
 /**
  * Runs nsmain.js on the SS 2.x path.
  *
- * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults}
+ * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults, getPreference}
  * @returns {Array}
  */
 const runV2 = (pOptions) => {
@@ -116,7 +116,10 @@ const runV2 = (pOptions) => {
             'N/query': createQueryModule(pOptions.scriptRows || []),
             'N/search': oSearch,
             'N/util': {extend: (pTarget, pSource) => Object.assign(pTarget, pSource)},
-            'N/currentRecord': createCurrentRecordModule(pOptions.record)
+            'N/currentRecord': createCurrentRecordModule(pOptions.record),
+            'N/runtime': {
+                getCurrentUser: () => ({getPreference: pOptions.getPreference || (() => undefined)})
+            }
         })
     });
 };
@@ -143,6 +146,7 @@ const runV1 = (pGlobals) => {
         nlapiGetFieldValue: () => '',
         nlapiGetRecordId: () => '',
         nlapiLookupField: () => '',
+        nlapiGetContext: () => ({getPreference: () => null}),
         ...pGlobals
     });
 };
@@ -390,5 +394,112 @@ describe('nsmain.js CUSTOM_FORM_ID', () => {
 
         expect(oMessage.error).toBeNull();
         expect(oMessage.data.CUSTOM_FORM_ID).toBe('');
+    });
+});
+
+describe('nsmain.js CLIENT_LIMIT_REMOVED (REMOVECLIENTGOVERNANCELIMIT)', () => {
+
+    const sPreference = 'REMOVECLIENTGOVERNANCELIMIT';
+
+    /**
+     * SS 2.x run with a getPreference double; records the requested preference name.
+     *
+     * @param {Function} pGetPreference - Returns the raw value or throws
+     * @returns {{value: *, names: string[]}}
+     */
+    const runPreferenceV2 = (pGetPreference) => {
+
+        const aNames = [];
+        const oMessage = onlyMessage(runV2({
+            record: makeRecord('salesorder', 7),
+            getPreference: (pOptions) => {
+
+                aNames.push(pOptions.name);
+                return pGetPreference();
+            }
+        }));
+
+        return {value: oMessage.data.CLIENT_LIMIT_REMOVED, names: aNames};
+    };
+
+    /**
+     * SS 1.0 run with an nlapiGetContext().getPreference double.
+     *
+     * @param {Function} pGetPreference - Returns the raw value or throws
+     * @returns {{value: *, names: string[]}}
+     */
+    const runPreferenceV1 = (pGetPreference) => {
+
+        const aNames = [];
+        const oMessage = onlyMessage(runV1({
+            nlapiGetContext: () => ({
+                getPreference: (pName) => {
+
+                    aNames.push(pName);
+                    return pGetPreference();
+                }
+            })
+        }));
+
+        return {value: oMessage.data.CLIENT_LIMIT_REMOVED, names: aNames};
+    };
+
+    const fnThrow = () => {
+
+        throw new Error('preference not readable');
+    };
+
+    test.each([
+        ['true (limit removed)', () => true, true],
+        ['false (limit in force)', () => false, false],
+        ['undefined (unknown preference)', () => undefined, null],
+        ['null', () => null, null],
+        ['empty string', () => '', null],
+        ['exception', fnThrow, null]
+    ])('SS 2.x getPreference %s', (pLabel, pGetPreference, pExpected) => {
+
+        const oResult = runPreferenceV2(pGetPreference);
+
+        expect(oResult.value).toBe(pExpected);
+        expect(oResult.names).toEqual([sPreference]);
+    });
+
+    test('SS 2.x getCurrentUser failure yields null', () => {
+
+        const oMessage = onlyMessage(runPageScript('nsmain', {
+            require: createRequire({
+                'N/query': createQueryModule([]),
+                'N/search': createSearchModule(() => []),
+                'N/util': {extend: (pTarget, pSource) => Object.assign(pTarget, pSource)},
+                'N/currentRecord': createCurrentRecordModule(makeRecord('salesorder', 7)),
+                'N/runtime': {getCurrentUser: fnThrow}
+            })
+        }));
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.CLIENT_LIMIT_REMOVED).toBeNull();
+    });
+
+    test.each([
+        ["'T' (limit removed)", () => 'T', true],
+        ["'F' (limit in force)", () => 'F', false],
+        ['null (unknown preference)', () => null, null],
+        ['undefined', () => undefined, null],
+        ['empty string', () => '', null],
+        ['exception', fnThrow, null]
+    ])('SS 1.0 getPreference %s', (pLabel, pGetPreference, pExpected) => {
+
+        const oResult = runPreferenceV1(pGetPreference);
+
+        expect(oResult.value).toBe(pExpected);
+        expect(oResult.names).toEqual([sPreference]);
+    });
+
+    test('SS 1.0 without nlapiGetContext yields null', () => {
+
+        const oMessage = onlyMessage(runV1({nlapiGetContext: undefined}));
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.CLIENT_LIMIT_REMOVED).toBeNull();
     });
 });

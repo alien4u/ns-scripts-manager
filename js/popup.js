@@ -900,12 +900,15 @@ const runPopupLogic = async () => {
 
     /**
      * Renders a section (header + body of cards) for a script group.
+     * The header count shows rendered cards; the limit warnings use the running count.
      *
      * @param {DocumentFragment} pFragment
      * @param {string} pType
-     * @param {Array} pScripts
+     * @param {Array} pScripts - Cards to render (Deployed filter applied)
+     * @param {number} pRunningCount - Active + testing deployments of this type, filter independent
+     * @param {boolean|null} pClientLimitRemoved - REMOVECLIENTGOVERNANCELIMIT, null when unknown
      */
-    const renderScriptSection = (pFragment, pType, pScripts) => {
+    const renderScriptSection = (pFragment, pType, pScripts, pRunningCount, pClientLimitRemoved) => {
 
         /* Section Header */
         const oHeader = document.createElement('div');
@@ -922,13 +925,15 @@ const runPopupLogic = async () => {
         oHeader.appendChild(oHeaderText);
         oHeader.appendChild(oHeaderCount);
 
-        /* Count Warning Badge */
+        /* Count Warning Badge: only deployments that run count; none when the client limit is removed */
         const sTypeLower = pType.toLowerCase();
-        const nCount = pScripts.length;
+        const nCount = pRunningCount;
         const sClientDocsUrl = 'https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_N3949604.html';
         const sUeDocsUrl = 'https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/chapter_N3361453.html';
+        const sClientLimitPreference = ' Administrators can remove this limit with the Remove Client Script ' +
+            'Deployment Limit per Record preference (NetSuite 2026.2+).';
 
-        if (sTypeLower === 'client' && nCount >= 8) {
+        if (sTypeLower === 'client' && pClientLimitRemoved !== true && nCount >= 8) {
 
             const oWarn = document.createElement('span');
             oWarn.className = 'sm-count-warn';
@@ -944,6 +949,8 @@ const runPopupLogic = async () => {
                 oWarn.textContent = nCount;
                 sTooltipText = 'Approaching the default limit of 10 Client scripts per record.';
             }
+
+            sTooltipText += sClientLimitPreference;
 
             const oTip = document.createElement('div');
             oTip.className = 'sm-warn-tooltip';
@@ -1172,8 +1179,11 @@ const runPopupLogic = async () => {
      * @param {Array} pFormScriptsData
      * @param {string} pScriptError
      * @param {string} pWorkflowError
+     * @param {boolean|null} pClientLimitRemoved - REMOVECLIENTGOVERNANCELIMIT, null when unknown
      */
-    const renderAll = (pScriptsData, pWorkflowsData, pFormScriptsData, pScriptError, pWorkflowError) => {
+    const renderAll = (
+        pScriptsData, pWorkflowsData, pFormScriptsData, pScriptError, pWorkflowError, pClientLimitRemoved
+    ) => {
 
         /* Filter for Deployed Only */
         const bShowOnlyDeployed = oDeployedToggle?.classList.contains('active');
@@ -1191,14 +1201,28 @@ const runPopupLogic = async () => {
                 : pItems;
         };
 
-        const aFilteredScripts = filterDeployed(pScriptsData);
         const aFilteredWorkflows = filterDeployed(pWorkflowsData || []);
         const aFilteredFormScripts = filterDeployed(pFormScriptsData || []);
 
-        /* Group scripts by type */
-        let oGroupedScripts = aFilteredScripts.reduce((pAcc, pScriptObj) => {
+        /*
+         * Group scripts by type (Deployed filter applied) and count running deployments
+         * (STATE active/testing) per type from the full data for the limit warnings.
+         */
+        const oRunningByType = {};
 
-            (pAcc[pScriptObj.SCRIPT_TYPE] = pAcc[pScriptObj.SCRIPT_TYPE] || []).push(pScriptObj);
+        let oGroupedScripts = pScriptsData.reduce((pAcc, pScriptObj) => {
+
+            const sType = pScriptObj.SCRIPT_TYPE;
+            const bRunning = RUN_STATES[pScriptObj.STATE] === true;
+
+            if (bRunning) {
+                oRunningByType[sType] = (oRunningByType[sType] || 0) + 1;
+            }
+
+            if (bRunning || !bShowOnlyDeployed) {
+                (pAcc[sType] = pAcc[sType] || []).push(pScriptObj);
+            }
+
             return pAcc;
         }, {});
 
@@ -1246,7 +1270,9 @@ const runPopupLogic = async () => {
                     bRenderedAnything = true;
                 }
             } else if (oGroupedScripts[pKey]) {
-                renderScriptSection(oFragment, pKey, oGroupedScripts[pKey]);
+                renderScriptSection(
+                    oFragment, pKey, oGroupedScripts[pKey], oRunningByType[pKey] || 0, pClientLimitRemoved
+                );
                 bRenderedAnything = true;
             }
         });
@@ -1293,10 +1319,14 @@ const runPopupLogic = async () => {
             return;
         }
 
-        const {SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR} = oLastData;
+        const {
+            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR, CLIENT_LIMIT_REMOVED
+        } = oLastData;
         oCardsContainer.replaceChildren();
         oMessage.classList.remove('visible');
-        renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
+        renderAll(
+            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR, CLIENT_LIMIT_REMOVED
+        );
     };
 
     /**
@@ -2565,11 +2595,15 @@ const runPopupLogic = async () => {
                         }
 
                         const {
-                            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR
+                            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR,
+                            CLIENT_LIMIT_REMOVED
                         } = oLastData;
 
                         oCardsContainer.replaceChildren();
-                        renderAll(SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR);
+                        renderAll(
+                            SCRIPTS_DATA, WORKFLOWS_DATA, FORM_SCRIPTS_DATA, SCRIPT_ERROR, WORKFLOW_ERROR,
+                            CLIENT_LIMIT_REMOVED
+                        );
                         return;
                     }
                 }
