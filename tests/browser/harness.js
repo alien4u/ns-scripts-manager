@@ -4,7 +4,7 @@
  *
  * Query params:
  *   ?scenario=record | unknown-form | forms-only | create-mode | no-record | no-api | deployed-filter | slow-forms
- *             | count-warnings | cache | no-session | slow-reply | non-netsuite
+ *             | count-warnings | cache | no-session | slow-reply | non-netsuite | refresh-during-read
  *   ?fixture=<url>   fixture JSON, same shape as tests/browser/fixtures/record.json (default)
  *
  * Expected badges come from the PLAN STATE table encoded below, not from popup.js.
@@ -18,7 +18,7 @@
 
     const SCENARIOS = [
         'record', 'unknown-form', 'forms-only', 'create-mode', 'no-record', 'no-api', 'deployed-filter', 'slow-forms',
-        'count-warnings', 'cache', 'no-session', 'slow-reply', 'non-netsuite'
+        'count-warnings', 'cache', 'no-session', 'slow-reply', 'non-netsuite', 'refresh-during-read'
     ];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
@@ -63,6 +63,8 @@
         forceLightOnce: false,
         advanceClockOnReply: 0,
         deferSessionSet: false,
+        deferSessionGet: false,
+        releaseSessionGet: null,
         replyDelayMs: 0,
         releaseSessionSet: null
     };
@@ -484,6 +486,16 @@
             get: async (pKeys) => {
 
                 const aKeys = pKeys == null ? Object.keys(pBacking) : [].concat(pKeys);
+
+                /* Held read (session area): released by the harness with oState.releaseSessionGet() */
+                if (pBacking === oSession && oState.deferSessionGet) {
+                    oState.deferSessionGet = false;
+                    await new Promise((pResolve) => {
+
+                        oState.releaseSessionGet = pResolve;
+                    });
+                }
+
                 return Object.fromEntries(
                     aKeys.filter((pKey) => pKey in pBacking).map((pKey) => [pKey, structuredClone(pBacking[pKey])])
                 );
@@ -697,8 +709,10 @@
 
     /**
      * Loads the real js/popup.js and fires DOMContentLoaded for it.
+     *
+     * @param {boolean} [pWaitForRender] - false: return right after DOMContentLoaded
      */
-    const startPopup = async () => {
+    const startPopup = async (pWaitForRender = true) => {
 
         await new Promise((pResolve, pReject) => {
 
@@ -710,6 +724,11 @@
         });
 
         document.dispatchEvent(new Event('DOMContentLoaded'));
+
+        if (!pWaitForRender) {
+            return;
+        }
+
         await waitFor(isRendered, 10000, 'popup render');
         await delay(100);
     };
@@ -2059,6 +2078,8 @@
             oState.response.data = buildWarningPayload(oFixture, WARNING_PHASES[0]);
         } else if (sScenario === 'slow-reply') {
             oState.replyDelayMs = 5000;
+        } else if (sScenario === 'refresh-during-read') {
+            oState.deferSessionGet = true;
         }
 
         oState.tabUrl = sScenario === 'non-netsuite' ? NON_NETSUITE_URL : oFixture.origin + sTabPath;
@@ -2069,7 +2090,20 @@
         installChrome(JSON.parse(sManifest), sScenario !== 'no-session');
         installFetch(sFormsHtml, sStackHtml);
         mountPopup(sPopupHtml);
-        await startPopup();
+        await startPopup(sScenario !== 'refresh-during-read');
+
+        if (sScenario === 'refresh-during-read') {
+
+            /* Initial open is held in its storage.session read; Refresh starts meanwhile */
+            await waitFor(() => !!oState.releaseSessionGet, 5000, 'held cache read');
+            document.getElementById('refreshBtn').click();
+            oState.releaseSessionGet();
+
+            await waitFor(isRendered, 12000, 'render after refresh');
+
+            /* Room for a late message from the superseded open */
+            await delay(1500);
+        }
 
         const oMessage = document.getElementById('message');
         const oCards = document.getElementById('scriptCards');
@@ -2161,6 +2195,18 @@
                     `reply after ${nReplyMs.toFixed(0)} ms, ${oLog.polls} polls, message="${oMessage.textContent}"`
                 );
                 checkItems(oFixture, oPayload, false, undefined, 'slow reply');
+            } else if (sScenario === 'refresh-during-read') {
+                check(
+                    'Refresh during the initial cache read: only the Refresh request id reaches the background',
+                    oLog.injects.length === 1 && oLog.injects[0].cacheKeys.length === 0,
+                    JSON.stringify(oLog.injects)
+                );
+                check(
+                    'Refresh during the initial cache read: no timeout or error message',
+                    !oMessage.classList.contains('visible') && !oMessage.classList.contains('error'),
+                    `message="${oMessage.textContent}" class="${oMessage.className}"`
+                );
+                checkItems(oFixture, oPayload, false, undefined, 'refresh during cache read');
             }
         }
 

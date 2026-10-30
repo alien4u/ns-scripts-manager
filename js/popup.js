@@ -2887,6 +2887,11 @@ const runPopupLogic = async () => {
 
             const oFreshEntries = pForceRefresh ? {} : await readFreshCacheEntries();
 
+            /* A Refresh during the cache read took over: sending this stale id would reset content.js */
+            if (sRequestId !== sActiveRequestId) {
+                return;
+            }
+
             /* Inject content script via background SW */
             const oInjectResponse = await chrome.runtime.sendMessage({
                 type: 'INJECT_AND_GET_DATA',
@@ -2909,7 +2914,11 @@ const runPopupLogic = async () => {
             await pollForData(oTab.id, 25, 400, sRequestId, oFreshEntries, !!pForceRefresh);
 
         } catch (pErr) {
-            showMessage('Error: ' + pErr.message, true);
+
+            /* A superseded request never reports */
+            if (sRequestId === sActiveRequestId) {
+                showMessage('Error: ' + pErr.message, true);
+            }
         }
     };
 
