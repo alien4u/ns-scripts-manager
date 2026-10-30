@@ -22,7 +22,7 @@
     ];
     const NO_RECORD_TEXT = 'Open a NetSuite record to view its scripts.';
     const FORM_TITLE = 'Runs only on records that use this form';
-    const DEFAULT_GROUP_ORDER = ['User Event', 'Client', 'Form Scripts', 'Mass Update', 'Workflow Action', 'Workflows'];
+    const DEFAULT_GROUP_ORDER = ['Client', 'Form Scripts', 'User Event', 'Workflows', 'Workflow Action', 'Mass Update'];
     const LEGACY_GROUP_ORDER = [
         'User Event', 'Client', 'Mass Update', 'Workflow Action', 'Custom GL Lines (Plug-in)', 'Workflows'
     ];
@@ -879,7 +879,7 @@
         checkItems(pFixture, pPayload, false);
 
         checkEqual(
-            'Groups in default order ("Form Scripts" after Client, no " Scripts" suffix on Form Scripts/Workflows)',
+            'Fresh storage: groups render in the default order (Client, Form Scripts, User Event, Workflows, ...)',
             getSections().map((pSection) => pSection.title),
             expectedSectionTitles(pFixture, pPayload)
         );
@@ -904,7 +904,7 @@
         checkTruncation(pFixture);
 
         const aDrawer = readDrawerGroups();
-        checkEqual('Settings drawer shows the default group order without Custom GL', aDrawer, DEFAULT_GROUP_ORDER);
+        checkEqual('Fresh storage: Settings drawer shows the default group order', aDrawer, DEFAULT_GROUP_ORDER);
 
         check('Scripted Records button enabled', !document.getElementById('scriptedRecordsBtn').disabled, 'disabled');
 
@@ -952,6 +952,125 @@
         });
 
         document.getElementById('darkToggle').click();
+    };
+
+    /* ── Settings drawer vs scheduler view exclusivity (PLAN section 12) ── */
+
+    /**
+     * True when the element is displayed (inline style and computed style).
+     *
+     * @param {HTMLElement} pEl
+     * @returns {boolean}
+     */
+    const isDisplayed = (pEl) => pEl.style.display !== 'none' && getComputedStyle(pEl).display !== 'none';
+
+    /**
+     * Snapshot of the toolbar buttons, drawer, scheduler views and main view.
+     *
+     * @returns {Object}
+     */
+    const readViews = () => {
+
+        return {
+            settingsActive: document.getElementById('settingsBtn').classList.contains('active'),
+            schedulerActive: document.getElementById('schedulerBtn').classList.contains('active'),
+            drawer: document.getElementById('settingsDrawer').style.display === 'block',
+            warning: document.getElementById('schedulerWarning').style.display === 'block',
+            panel: document.getElementById('schedulerPanel').style.display === 'block',
+            cards: isDisplayed(document.getElementById('scriptCards')),
+            footer: isDisplayed(document.querySelector('.sm-footer'))
+        };
+    };
+
+    /**
+     * Asserts the views match pExpected (only the listed keys).
+     *
+     * @param {string} pLabel
+     * @param {Object} pExpected
+     */
+    const checkViews = (pLabel, pExpected) => {
+
+        const oActual = readViews();
+        const aDiffs = Object.keys(pExpected)
+            .filter((pKey) => oActual[pKey] !== pExpected[pKey])
+            .map((pKey) => `${pKey}=${oActual[pKey]} (want ${pExpected[pKey]})`);
+
+        check(pLabel, aDiffs.length === 0, aDiffs.join('; '));
+    };
+
+    /**
+     * Clicks the scheduler button and waits for its async open/close to settle.
+     *
+     * @param {boolean} pExpectOpen
+     */
+    const clickScheduler = async (pExpectOpen) => {
+
+        document.getElementById('schedulerBtn').click();
+
+        await waitFor(() => {
+
+            const oViews = readViews();
+            return (oViews.warning || oViews.panel) === pExpectOpen;
+        }, 3000, 'scheduler view toggle');
+        await delay(50);
+    };
+
+    /**
+     * Both switch directions for the safety warning (fresh storage) and the stored-data panel;
+     * closing either view never opens the other.
+     */
+    const runExclusivityChecks = async () => {
+
+        const oSettingsBtn = document.getElementById('settingsBtn');
+        const oMainView = {cards: true, footer: true};
+
+        await clickScheduler(true);
+        checkViews('Sync opened (no stored data): safety warning shown, main view hidden', {
+            schedulerActive: true, warning: true, panel: false, cards: false, footer: false
+        });
+
+        oSettingsBtn.click();
+        checkViews('Settings opened over the warning: warning closed, Sync inactive, cards visible again', {
+            settingsActive: true, drawer: true, schedulerActive: false, warning: false, panel: false, ...oMainView
+        });
+
+        await clickScheduler(true);
+        checkViews('Sync opened over Settings: drawer closed, Settings inactive, warning shown', {
+            settingsActive: false, drawer: false, schedulerActive: true, warning: true
+        });
+
+        await clickScheduler(false);
+        checkViews('Closing Sync does not open Settings', {
+            settingsActive: false, drawer: false, schedulerActive: false, warning: false, panel: false, ...oMainView
+        });
+
+        oSettingsBtn.click();
+        oSettingsBtn.click();
+        checkViews('Closing Settings does not open Sync', {
+            settingsActive: false, drawer: false, schedulerActive: false, warning: false, panel: false, ...oMainView
+        });
+
+        /* Stored deployments open the panel instead of the warning */
+        oStore.scheduledDeployments = [{
+            internalId: '9001',
+            deploymentId: 'customdeploy_harness_scheduled',
+            title: 'Harness Scheduled Deployment',
+            scriptName: 'Harness Scheduled Script'
+        }];
+
+        oSettingsBtn.click();
+        await clickScheduler(true);
+        checkViews('Sync opened over Settings (stored data): drawer closed, Settings inactive, panel shown', {
+            settingsActive: false, drawer: false, schedulerActive: true, warning: false, panel: true, cards: false
+        });
+
+        oSettingsBtn.click();
+        checkViews('Settings opened over the panel: panel closed, Sync inactive, cards visible again', {
+            settingsActive: true, drawer: true, schedulerActive: false, warning: false, panel: false, ...oMainView
+        });
+
+        oSettingsBtn.click();
+        delete oStore.scheduledDeployments;
     };
 
     /* ── count-warnings: Client limit / UE advisory on running deployments (PLAN section 10) ── */
@@ -1370,6 +1489,7 @@
 
             if (sScenario === 'record') {
                 runRecordChecks(oFixture, oPayload);
+                await runExclusivityChecks();
             } else if (sScenario === 'unknown-form') {
                 checkItems(oFixture, oPayload, false);
             } else if (sScenario === 'forms-only') {

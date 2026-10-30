@@ -223,6 +223,8 @@ Chrome, Edge, Firefox (MV3, 121+), and Safari (via Web Extension wrapper).
 - Client and User Event count warnings count only running deployments (active or testing); the Client limit warning honors the new "Remove Client Script Deployment Limit per Record" preference (NetSuite 2026.2+)
 - No more Content Security Policy errors on the extension Errors page when reading NetSuite pages (stack order and form scripts)
 - Removed the Custom GL Lines (Plug-in) group, which could never populate
+- New default group order: Client, Form Scripts, User Event, Workflows, Workflow Action, Mass Update (saved orders are kept)
+- The group order settings and the Scheduled Deployments Sync panel no longer open at the same time
 - Removed the sponsor footer
 
 ### v1.0.5 - 2026-03-12

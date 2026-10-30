@@ -81,12 +81,12 @@ const runPopupLogic = async () => {
      * ──────────────────────────────────────────────── */
 
     const DEFAULT_GROUP_ORDER = [
-        'User Event',
         'Client',
         'Form Scripts',
-        'Mass Update',
+        'User Event',
+        'Workflows',
         'Workflow Action',
-        'Workflows'
+        'Mass Update'
     ];
 
     /** Current group order (loaded from storage or default) */
@@ -1462,12 +1462,61 @@ const runPopupLogic = async () => {
     });
 
     /* ────────────────────────────────────────────────
+     * Scheduler View Visibility
+     * (defined before the Settings drawer handler, which closes the scheduler view)
+     * ──────────────────────────────────────────────── */
+
+    const oFooterEl = document.querySelector('.sm-footer');
+
+    /**
+     * Toggles visibility of main content siblings when scheduler views are active.
+     *
+     * @param {boolean} bShow - true to hide cards/footer/spinner, false to restore
+     */
+    const setSchedulerView = (bShow) => {
+        const sCards = bShow ? 'none' : '';
+        oCardsContainer.style.display = sCards;
+        oFooterEl.style.display = sCards;
+        oSpinner.style.display = sCards;
+    };
+
+    /**
+     * Closes the scheduler safety warning / panel when either is open and restores the main view.
+     *
+     * @returns {boolean} true when a scheduler view was open
+     */
+    const closeSchedulerView = () => {
+
+        const bWarningVisible = oSchedulerWarning.style.display === 'block';
+        const bPanelVisible = oSchedulerPanel.style.display === 'block';
+
+        if (!bWarningVisible && !bPanelVisible) {
+            return false;
+        }
+
+        oSchedulerWarning.style.display = 'none';
+        oSchedulerPanel.style.display = 'none';
+        oSchedulerBtn.classList.remove('active');
+        setSchedulerView(false);
+        if (oMessage.textContent) {
+            oMessage.classList.add('visible');
+        }
+        return true;
+    };
+
+    /* ────────────────────────────────────────────────
      * Settings Drawer (Group Order — Drag & Drop)
      * ──────────────────────────────────────────────── */
 
     oSettingsBtn?.addEventListener('click', () => {
 
         const bVisible = oSettingsDrawer.style.display === 'block';
+
+        /* Settings and the scheduler view are never open together */
+        if (!bVisible) {
+            closeSchedulerView();
+        }
+
         oSettingsDrawer.style.display = bVisible ? 'none' : 'block';
         oSettingsBtn.classList.toggle('active', !bVisible);
 
@@ -2173,35 +2222,15 @@ const runPopupLogic = async () => {
         oSchedulerWarning.appendChild(oFooter);
     };
 
-    const oFooterEl = document.querySelector('.sm-footer');
-
-    /**
-     * Toggles visibility of main content siblings when scheduler views are active.
-     *
-     * @param {boolean} bShow - true to hide cards/footer/spinner, false to restore
-     */
-    const setSchedulerView = (bShow) => {
-        const sCards = bShow ? 'none' : '';
-        oCardsContainer.style.display = sCards;
-        oFooterEl.style.display = sCards;
-        oSpinner.style.display = sCards;
-    };
-
     oSchedulerBtn?.addEventListener('click', async () => {
 
-        const bWarningVisible = oSchedulerWarning.style.display === 'block';
-        const bPanelVisible = oSchedulerPanel.style.display === 'block';
-
-        if (bWarningVisible || bPanelVisible) {
-            oSchedulerWarning.style.display = 'none';
-            oSchedulerPanel.style.display = 'none';
-            oSchedulerBtn.classList.remove('active');
-            setSchedulerView(false);
-            if (oMessage.textContent) {
-                oMessage.classList.add('visible');
-            }
+        if (closeSchedulerView()) {
             return;
         }
+
+        /* Settings and the scheduler view are never open together */
+        oSettingsDrawer.style.display = 'none';
+        oSettingsBtn?.classList.remove('active');
 
         oMessage.classList.remove('visible');
         oSchedulerBtn.classList.add('active');
