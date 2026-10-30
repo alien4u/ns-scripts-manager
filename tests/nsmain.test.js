@@ -101,7 +101,8 @@ const oaWorkflowResultsV1 = aWorkflowDefs.map(([pId, pValue, pText, pInactive]) 
 /**
  * Runs nsmain.js on the SS 2.x path.
  *
- * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults, getPreference, role, document}
+ * @param {Object} pOptions - {record, lookupFields, scriptRows, workflowResults, getPreference, role, document,
+ *     globals (extra page globals such as nlapi*)}
  * @returns {Array}
  */
 const runV2 = (pOptions) => {
@@ -112,6 +113,7 @@ const runV2 = (pOptions) => {
     );
 
     return runPageScript('nsmain', {
+        ...(pOptions.globals || {}),
         ...(pOptions.document ? {document: pOptions.document} : {}),
         require: createRequire({
             'N/query': createQueryModule(pOptions.scriptRows || []),
@@ -681,5 +683,66 @@ describe('nsmain.js popup cache request (request id, cache keys, ROLE_ID, light 
         expect(oMessage.data.FROM_CACHE).toBeUndefined();
         expect(oMessage.data.ROLE_ID).toBe('1018');
         expect(oMessage.data.SCRIPTS_DATA).toHaveLength(oaScriptRowsV2.length);
+    });
+});
+
+describe('nsmain.js empty N/currentRecord record (type/id null) falls back to SS 1.0', () => {
+
+    /* What N/currentRecord.get() returned on a live Sales Order: no exception, no type, no id */
+    const oEmptyRecord = {type: null, id: null, getValue: () => undefined};
+
+    test('view mode: RECORD_TYPE from nlapiGetRecordType, form looked up with nlapiGetRecordId', () => {
+
+        let oLookupArgs = null;
+        const oMessage = onlyMessage(runV2({
+            record: oEmptyRecord,
+            scriptRows: oaScriptRowsV2,
+            globals: {
+                nlapiGetRecordType: () => 'salesorder',
+                nlapiGetRecordId: () => '7'
+            },
+            lookupFields: (pOptions) => {
+
+                oLookupArgs = pOptions;
+                return {customform: [{value: '55', text: 'Synthetic Form'}]};
+            }
+        }));
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.RECORD_TYPE).toBe('salesorder');
+        expect(oMessage.data.API_VERSION).toBe('2.x');
+        expect(oMessage.data.SCRIPTS_DATA).toHaveLength(oaScriptRowsV2.length);
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('55');
+        expect(JSON.parse(JSON.stringify(oLookupArgs))).toEqual({type: 'salesorder', id: '7', columns: ['customform']});
+    });
+
+    test('create mode (no id anywhere): form from nlapiGetFieldValue, no lookup', () => {
+
+        let nLookups = 0;
+        const oMessage = onlyMessage(runV2({
+            record: {...oEmptyRecord, type: ''},
+            globals: {
+                nlapiGetRecordType: () => 'salesorder',
+                nlapiGetRecordId: () => '',
+                nlapiGetFieldValue: (pField) => (pField === 'customform' ? '42' : '')
+            },
+            lookupFields: () => {
+
+                nLookups++;
+                return {customform: [{value: '99'}]};
+            }
+        }));
+
+        expect(oMessage.error).toBeNull();
+        expect(oMessage.data.RECORD_TYPE).toBe('salesorder');
+        expect(oMessage.data.CUSTOM_FORM_ID).toBe('42');
+        expect(nLookups).toBe(0);
+    });
+
+    test('empty record and no SS 1.0 record type: still NO_RECORD', () => {
+
+        const oMessage = onlyMessage(runV2({record: oEmptyRecord}));
+
+        expect(oMessage.error).toBe('NO_RECORD');
     });
 });

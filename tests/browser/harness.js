@@ -58,7 +58,9 @@
         releaseSchedulerGet: null,
         staleReplies: [],
         forceLightOnce: false,
-        advanceClockOnReply: 0
+        advanceClockOnReply: 0,
+        deferSessionSet: false,
+        releaseSessionSet: null
     };
 
     window.addEventListener('error', (pEvent) => {
@@ -483,6 +485,15 @@
                 );
             },
             set: async (pItems) => {
+
+                /* Held write (session area): released by the harness with oState.releaseSessionSet() */
+                if (pBacking === oSession && oState.deferSessionSet) {
+                    oState.deferSessionSet = false;
+                    await new Promise((pResolve) => {
+
+                        oState.releaseSessionSet = pResolve;
+                    });
+                }
 
                 pSetLog?.push(structuredClone(pItems));
                 Object.assign(pBacking, structuredClone(pItems));
@@ -1708,6 +1719,48 @@
             document.querySelectorAll('#scriptCards .sm-deploy-id').length === pPayload.SCRIPTS_DATA.length &&
                 !getSections().some((pSection) => pSection.title === 'Form Scripts'),
             getSections().map((pSection) => pSection.title).join(', ')
+        );
+
+        /* 11. Refresh lands while the previous request is writing the cache entry (review MN-001) */
+        const sMarker = 'Superseded Request Marker WF';
+
+        Object.keys(oSession).forEach((pKey) => {
+
+            delete oSession[pKey];
+        });
+        oState.response.data = structuredClone(pPayload);
+        oState.response.data.WORKFLOWS_DATA.push({
+            WORKFLOW: '698', WORKFLOW_NAME: sMarker, DESCRIPTION: '', STATUS: 'Released', INACTIVE: false,
+            STATE: 'active', URL: `${pFixture.origin}/app/common/workflow/setup/workflowmanager.nl?id=698`, EDIT_URL: ''
+        });
+        oState.deferSessionSet = true;
+        oState.releaseSessionSet = null;
+
+        document.body.replaceChildren();
+        mountPopup(oState.popupHtml);
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        await waitFor(() => !!oState.releaseSessionSet, 10000, 'held cache write');
+
+        oState.response.data = structuredClone(pPayload);
+        document.getElementById('refreshBtn').click();
+        oState.releaseSessionSet();
+
+        /* Well inside the 400 ms before the Refresh request's first poll */
+        await delay(120);
+        const oSpinner = document.getElementById('spinner');
+        check(
+            'Refresh during the cache write: the superseded request neither renders nor hides the spinner',
+            !document.getElementById('scriptCards').textContent.includes(sMarker) &&
+                getSections().length === 0 && !oSpinner.classList.contains('hidden'),
+            `sections=${getSections().length} spinnerHidden=${oSpinner.classList.contains('hidden')}`
+        );
+
+        await waitFor(isRendered, 10000, 'refresh render after held write');
+        await delay(100);
+        check(
+            'Refresh during the cache write: the Refresh result renders',
+            snapshotView() === sFreshView && oSpinner.classList.contains('hidden'),
+            'render differs'
         );
 
         oState.response.data = structuredClone(pPayload);

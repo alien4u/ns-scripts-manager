@@ -2758,6 +2758,11 @@ const runPopupLogic = async () => {
             }
         }
 
+        /* Refresh can also land during the cache write */
+        if (pRequestId !== sActiveRequestId) {
+            return;
+        }
+
         if (aStackOrder && aStackOrder.length > 0) {
             applyStackOrder(oLastData.SCRIPTS_DATA, aStackOrder);
             bStackOrderAvailable = true;

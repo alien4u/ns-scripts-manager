@@ -149,6 +149,15 @@
                 /* Field not available on this page */
             }
 
+            /* get() can return an empty record (type/id null) without throwing; SS 1.0 still has the id */
+            if (!sRecordId) {
+                try {
+                    sRecordId = String(nlapiGetRecordId() || '');
+                } catch (e) {
+                    /* SS 1.0 not available */
+                }
+            }
+
             if (!sFormId && sRecordId) {
                 try {
                     const oLookup = pSearch.lookupFields({type: pRecordType, id: sRecordId, columns: ['customform']});
@@ -160,7 +169,10 @@
                 }
             }
 
-            return String(sFormId);
+            /* No form and no record id from either API: the SS 1.0 field read below is the last option */
+            if (sFormId || sRecordId) {
+                return String(sFormId);
+            }
         }
 
         try {
@@ -588,8 +600,12 @@
         /* Try SS 2.x N/currentRecord first */
         if (pCurrentRecord) {
             try {
-                const oCurrRec = pCurrentRecord.get();
-                return oCurrRec.type || '';
+                const sType = pCurrentRecord.get().type;
+
+                /* get() can return an empty record (type/id null) without throwing: fall through to SS 1.0 */
+                if (typeof sType === 'string' && sType) {
+                    return sType;
+                }
             } catch (e) {
                 /* Fall through to SS 1.0 */
             }

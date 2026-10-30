@@ -16,7 +16,7 @@ The extension uses your browser's local storage (`chrome.storage.local`) to pers
 
 - Dark / Light mode selection, compact mode, Deployed-only filter, sort order and group ordering
 - Popup size
-- Scheduled Deployments Sync data you collect: the deployment IDs, titles and script names of scheduled
+- Scheduled Deployments Sync data you collect: the deployment IDs, script IDs, titles and script names of scheduled
   deployments, with the collection date, source environment and NetSuite account ID, kept until you clear
   them in the Sync panel
 
